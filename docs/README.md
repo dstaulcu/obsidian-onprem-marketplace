@@ -21,13 +21,14 @@ Obsidian's built-in plugin browser cannot be pointed at a custom registry, so th
 5. To self-update the marketplace plugin, nominate its repo too (id `onprem-marketplace`).
 
 ## Client bootstrap (once per vault)
-`node scripts/bootstrap-vault.mjs <vaultPath> <registryUrl>`, then in Obsidian turn off Restricted mode
+`node scripts/bootstrap-vault.mjs <vaultPath> <registryUrl> [publicKeyFile]` (pass the public key to pin it and default to `require-signed`), then in Obsidian turn off Restricted mode
 (Settings > Community plugins) and reload. Use the ribbon store icon or the "Browse internal plugins" command.
 
 ## Security notes
-Installed files are verified against sha256 hashes in the registry, but the registry is a trust boundary:
-only nominate repos you control, and restrict write access to the web root.
+Use `require-signed` mode (see [Review, approval & signing](concepts/attestation.md)) so clients install only versions an
+admin approved under a pinned key. Without signatures the sha256 values come from the same registry as the files and
+only catch corruption. Only nominate repos you trust and restrict write access to the web root. Full model and known gaps:
+[Security & trust model](concepts/security.md).
 
 ## Status
-Built and unit-tested (sync). The plugin compiles but has **not yet been run inside Obsidian**; the
-`app.plugins` internals in `packages/plugin/src/installer.ts` need to be confirmed against your Obsidian version.
+See the [project README](../README.md#status).
