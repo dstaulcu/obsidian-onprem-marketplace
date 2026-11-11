@@ -15,6 +15,10 @@ export interface Approval {
   sha256: FileHashes;
   approvedBy: string;
   approvedAt: string;
+  /** Verdict of the matching review at approval time ("none" if there was no review). */
+  reviewVerdict?: Verdict | "none";
+  /** Present only when an admin approved a version whose review was not a pass; holds their stated reason. */
+  override?: string;
 }
 
 /** Signed record of an automated review. Produced for every reviewed version, whatever the verdict. */
@@ -73,6 +77,22 @@ export async function checkApproval(
   return { ok: true, approval: a };
 }
 
+export type ReviewResult = { ok: true; record: ReviewRecord } | { ok: false; reason: string };
+
+/** Verifies a signed review record and that it is about exactly these hashes. ok means "signed and matches"; check verdict separately. */
+export async function checkReview(
+  bytes: Uint8Array<ArrayBuffer>, sigB64: string, publicKeySpkiB64: string,
+  expect: { id: string; version: string; actual: FileHashes },
+): Promise<ReviewResult> {
+  if (!(await verifySignature(bytes, sigB64, publicKeySpkiB64))) return { ok: false, reason: "bad review signature" };
+  let r: ReviewRecord;
+  try { r = JSON.parse(new TextDecoder().decode(bytes)) as ReviewRecord; } catch { return { ok: false, reason: "unreadable review" }; }
+  if (r?.schema !== 1 || r.id !== expect.id || r.version !== expect.version) return { ok: false, reason: "review is for a different plugin/version" };
+  for (const k of ["main", "manifest", "styles"] as const)
+    if (r.sha256?.[k] !== expect.actual[k]) return { ok: false, reason: `review covers different ${k}` };
+  return { ok: true, record: r };
+}
+
 export type TrustMode = "off" | "warn" | "require-signed";
 export interface Signed { bytes: Uint8Array<ArrayBuffer>; sig: string }
 export interface Pick<V extends { version: string; sha256: FileHashes }> { entry: V; approved: boolean }
@@ -85,6 +105,7 @@ export interface Pick<V extends { version: string; sha256: FileHashes }> { entry
 export async function selectVersion<V extends { version: string; sha256: FileHashes }>(
   id: string, versions: V[], mode: TrustMode, publicKey: string,
   getApproval: (version: string) => Promise<Signed | null>, wanted?: string,
+  opts: { requireReviewPass?: boolean; getReview?: (version: string) => Promise<Signed | null> } = {},
 ): Promise<{ pick: Pick<V> | null; reason?: string }> {
   const candidates = wanted ? versions.filter((v) => v.version === wanted) : versions;
   if (!candidates.length) return { pick: null, reason: "no such version" };
@@ -94,8 +115,15 @@ export async function selectVersion<V extends { version: string; sha256: FileHas
   for (const v of candidates) {
     const s = await getApproval(v.version).catch(() => null);
     const r = s ? await checkApproval(s.bytes, s.sig, publicKey, { id, version: v.version, actual: v.sha256 }) : null;
-    if (r?.ok) return { pick: { entry: v, approved: true } };
-    lastReason = r ? r.reason : "not approved";
+    let reviewReason: string | undefined;
+    if (r?.ok && opts.requireReviewPass) {
+      const rs = opts.getReview ? await opts.getReview(v.version).catch(() => null) : null;
+      const rr = rs ? await checkReview(rs.bytes, rs.sig, publicKey, { id, version: v.version, actual: v.sha256 }) : null;
+      if (!rr || !rr.ok) reviewReason = rr ? rr.reason : "no review record";
+      else if (rr.record.review.verdict !== "pass") reviewReason = `review verdict is ${rr.record.review.verdict}`;
+    }
+    if (r?.ok && !reviewReason) return { pick: { entry: v, approved: true } };
+    lastReason = reviewReason ?? (r && !r.ok ? r.reason : "not approved");
     if (mode === "warn") return { pick: { entry: candidates[0], approved: false }, reason: lastReason };
   }
   return { pick: null, reason: lastReason };

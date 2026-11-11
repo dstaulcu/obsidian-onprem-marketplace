@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { makeFetcher, syncRegistry, type Config } from "./sync";
 import { approveVersion, generateKeys } from "./signing";
 import { claudeReviewer, reviewVersion } from "./review";
+import { promoteStaged, type PublishPolicy } from "./catalog";
+import { rebuildIndex } from "./sync";
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -18,14 +20,16 @@ if (cmd === "keygen") {
   await writeFile(join(dir, "public-key.txt"), k.publicSpkiB64 + "\n");
   console.log(`Wrote ${priv} (keep secret, never commit) and public-key.txt (pin this in clients).`);
 } else if (cmd === "approve") {
-  // om-sync approve <id@version> --key <pem> [--registry registry] [--by name]
+  // om-sync approve <id@version> --key <pem> [--registry registry] [--by name] [--override "reason"] [--policy all|reviewed-pass|approved]
   const flag = (n: string, d?: string) => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : d; };
   const [id, version] = (rest[0] ?? "").split("@");
   const keyPath = flag("key");
   if (!id || !version || !keyPath) { console.error("usage: approve <id@version> --key <pem> [--registry dir] [--by name]"); process.exit(2); }
   const by = flag("by", process.env.USERNAME ?? process.env.USER ?? "admin")!;
-  const a = await approveVersion(flag("registry", "registry")!, id, version, await readFile(keyPath, "utf8"), by);
-  console.log(`approved ${a.id}@${a.version} by ${a.approvedBy}`);
+  const registry = flag("registry", "registry")!;
+  const a = await approveVersion(registry, id, version, await readFile(keyPath, "utf8"), by, flag("override"));
+  console.log(`approved ${a.id}@${a.version} by ${a.approvedBy} (review: ${a.reviewVerdict}${a.override ? `, override: ${a.override}` : ""})`);
+  await publishHeld(registry, (flag("policy") as PublishPolicy | undefined) ?? "all");
 } else if (cmd === "review") {
   // om-sync review <id@version | --all> [--config registry.config.json]
   const flag = (n: string, d?: string) => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : d; };
@@ -35,6 +39,7 @@ if (cmd === "keygen") {
   if (rest.includes("--all")) targets = await allVersions(cfg.outDir);
   else { const [id, version] = (rest[0] ?? "").split("@"); if (!id || !version) { console.error("usage: review <id@version | --all>"); process.exit(2); } targets = [{ id, version }]; }
   await runReviews(cfg, targets);
+  await publishHeld(cfg.outDir, cfg.publishPolicy ?? "all");
 } else {
   const cfgPath = cmd ?? "registry.config.json";
   const cfg = JSON.parse(await readFile(cfgPath, "utf8")) as Config;
@@ -45,13 +50,24 @@ if (cmd === "keygen") {
   r.errors.forEach((e) => console.error("  ! " + e));
   // Review problems are reported but never change the exit code (a flagged version must not keep a schedule red).
   if (cfg.review?.enabled) await runReviews(cfg, r.addedVersions);
+  await publishHeld(cfg.outDir, cfg.publishPolicy ?? "all");
   process.exit(r.errors.length ? 1 : 0);
+}
+
+/** Publishes staged versions that now satisfy the publish policy, then refreshes index.json. */
+async function publishHeld(outDir: string, policy: PublishPolicy) {
+  if (policy === "all") return;
+  const ids = await readdir(join(outDir, "plugins"));
+  const promoted = await promoteStaged(join(outDir, "plugins"), ids, policy);
+  if (promoted.length) { await rebuildIndex(outDir, {}); promoted.forEach((p) => console.log(`  published ${p}`)); }
 }
 
 async function allVersions(outDir: string) {
   const out: { id: string; version: string }[] = [];
   for (const id of await readdir(join(outDir, "plugins"))) {
-    try { for (const v of JSON.parse(await readFile(join(outDir, "plugins", id, "versions.json"), "utf8"))) out.push({ id, version: v.version }); } catch { /* skip */ }
+    for (const f of ["versions.json", "staged.json"]) {
+      try { for (const v of JSON.parse(await readFile(join(outDir, "plugins", id, f), "utf8"))) out.push({ id, version: v.version }); } catch { /* skip */ }
+    }
   }
   return out;
 }

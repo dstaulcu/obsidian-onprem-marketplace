@@ -1,10 +1,10 @@
 import { App, Modal, Notice, Platform, Plugin, PluginSettingTab, Setting, apiVersion } from "obsidian";
 import { compareSemver, type IndexEntry, type TrustMode } from "@om/shared";
 import { fetchIndex, reportUrl } from "./registry";
-import { install, installedVersion, isCompatible, resolveVersion, uninstall, updatesAvailable, type Trust } from "./installer";
+import { install, installedVersion, isCompatible, resolveVersion, reviewStatus, uninstall, updatesAvailable, type Trust } from "./installer";
 
-interface Settings { registryUrl: string; checkIntervalMinutes: number; trustMode: TrustMode; publicKey: string; }
-const DEFAULTS: Settings = { registryUrl: "https://obsidian-registry.example.internal", checkIntervalMinutes: 240, trustMode: "off", publicKey: "" };
+interface Settings { registryUrl: string; checkIntervalMinutes: number; trustMode: TrustMode; publicKey: string; hideUnapproved: boolean; requireReviewPass: boolean; }
+const DEFAULTS: Settings = { registryUrl: "https://obsidian-registry.example.internal", checkIntervalMinutes: 240, trustMode: "off", publicKey: "", hideUnapproved: false, requireReviewPass: false };
 
 export default class InternalMarketplace extends Plugin {
   settings!: Settings;
@@ -48,7 +48,7 @@ export default class InternalMarketplace extends Plugin {
     } catch (e) { new Notice(`Registry unreachable: ${(e as Error).message}`); }
   }
 
-  get trust(): Trust { return { mode: this.settings.trustMode, publicKey: this.settings.publicKey }; }
+  get trust(): Trust { return { mode: this.settings.trustMode, publicKey: this.settings.publicKey, requireReviewPass: this.settings.requireReviewPass }; }
 
   saveSettings() { return this.saveData(this.settings); }
 }
@@ -56,6 +56,7 @@ export default class InternalMarketplace extends Plugin {
 class MarketplaceModal extends Modal {
   private entries: IndexEntry[] = [];
   private approved = new Map<string, boolean>();
+  private review = new Map<string, string | null>();
   private query = "";
   constructor(app: App, private plugin: InternalMarketplace) { super(app); }
 
@@ -71,8 +72,12 @@ class MarketplaceModal extends Modal {
       if (this.plugin.settings.trustMode !== "off") {
         const t = this.plugin.trust;
         await Promise.all(this.entries.map(async (e) => {
-          try { this.approved.set(e.id, (await resolveVersion(this.plugin.settings.registryUrl, e.id, { ...t, mode: "warn" }, e.latestVersion)).approved); }
-          catch { this.approved.set(e.id, false); }
+          try {
+            const base = this.plugin.settings.registryUrl;
+            const pick = await resolveVersion(base, e.id, { ...t, mode: "warn" }, e.latestVersion);
+            this.approved.set(e.id, pick.approved);
+            this.review.set(e.id, await reviewStatus(base, e.id, pick.entry, t));
+          } catch { this.approved.set(e.id, false); this.review.set(e.id, null); }
         }));
       }
       this.render();
@@ -84,7 +89,9 @@ class MarketplaceModal extends Modal {
 
   private render() {
     this.listEl.empty();
-    const shown = this.entries.filter((e) => `${e.name} ${e.description} ${e.author}`.toLowerCase().includes(this.query));
+    const s0 = this.plugin.settings;
+    const shown = this.entries.filter((e) => `${e.name} ${e.description} ${e.author}`.toLowerCase().includes(this.query))
+      .filter((e) => !(s0.hideUnapproved && s0.trustMode !== "off" && !this.approved.get(e.id) && installedVersion(this.app, e.id) === null));
     if (!shown.length) this.listEl.setText("No plugins found.");
     for (const e of shown) {
       const cur = installedVersion(this.app, e.id);
@@ -98,8 +105,13 @@ class MarketplaceModal extends Modal {
           marginLeft: "8px", padding: "1px 8px", borderRadius: "999px", fontSize: "var(--font-ui-smaller)", fontWeight: "600",
           border: "1px solid currentColor", color: ok ? "var(--color-green)" : "var(--color-orange)",
         });
+        const rv = this.review.get(e.id);
         s.descEl.createEl("br");
-        s.descEl.createEl("a", { text: "Review report", href: reportUrl(this.plugin.settings.registryUrl, e.id, e.latestVersion) });
+        s.descEl.createSpan({ text: rv ? `Review: ${rv}` : "Not reviewed" });
+        if (rv) {
+          s.descEl.createSpan({ text: " · " });
+          s.descEl.createEl("a", { text: "report", href: reportUrl(this.plugin.settings.registryUrl, e.id, e.latestVersion) });
+        }
       }
       const hasUpdate = cur !== null && cur !== e.latestVersion;
       if (!blocked && (cur === null || hasUpdate))
@@ -138,6 +150,12 @@ class SettingsTab extends PluginSettingTab {
         .onChange(async (v) => { this.plugin.settings.trustMode = v as TrustMode; await this.plugin.saveSettings(); }));
     new Setting(this.containerEl).setName("Pinned public key").setDesc("Base64 SPKI key from public-key.txt. Set at bootstrap; never fetched from the registry.")
       .addTextArea((t) => t.setValue(this.plugin.settings.publicKey).onChange(async (v) => { this.plugin.settings.publicKey = v.trim(); await this.plugin.saveSettings(); }));
+    new Setting(this.containerEl).setName("Hide unapproved plugins")
+      .setDesc("In the browser, hide plugins whose latest version is not approved (already-installed ones stay visible).")
+      .addToggle((t) => t.setValue(this.plugin.settings.hideUnapproved).onChange(async (v) => { this.plugin.settings.hideUnapproved = v; await this.plugin.saveSettings(); }));
+    new Setting(this.containerEl).setName("Also require a passing review")
+      .setDesc("Only install versions that are approved AND have a signed review record with verdict pass for the same files.")
+      .addToggle((t) => t.setValue(this.plugin.settings.requireReviewPass).onChange(async (v) => { this.plugin.settings.requireReviewPass = v; await this.plugin.saveSettings(); }));
     new Setting(this.containerEl).setName("Check for updates now").addButton((b) => b.setButtonText("Check").onClick(() => this.plugin.checkUpdates(true)));
   }
 }

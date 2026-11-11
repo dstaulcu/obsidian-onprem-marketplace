@@ -1,8 +1,8 @@
 import type { App, PluginManifest } from "obsidian";
-import { compareSemver, isValidPluginId, selectVersion, type IndexEntry, type TrustMode, type VersionEntry } from "@om/shared";
+import { checkReview, compareSemver, isValidPluginId, selectVersion, type IndexEntry, type TrustMode, type VersionEntry } from "@om/shared";
 import { fetchFile, fetchSigned, fetchVersions, sha256Hex } from "./registry";
 
-export interface Trust { mode: TrustMode; publicKey: string }
+export interface Trust { mode: TrustMode; publicKey: string; requireReviewPass?: boolean }
 
 /**
  * All use of Obsidian's undocumented plugin-manager internals (app.plugins) is confined here,
@@ -31,9 +31,19 @@ export function isCompatible(entry: IndexEntry, appVersion: string, isMobile: bo
 export async function resolveVersion(base: string, id: string, trust: Trust, version?: string): Promise<{ entry: VersionEntry; approved: boolean }> {
   if (!isValidPluginId(id)) throw new Error(`Invalid plugin id: ${id}`);
   const versions = (await fetchVersions(base, id)).sort((a, b) => compareSemver(b.version, a.version));
-  const { pick, reason } = await selectVersion(id, versions, trust.mode, trust.publicKey, (ver) => fetchSigned(base, id, ver, "approval.json"), version);
+  const { pick, reason } = await selectVersion(id, versions, trust.mode, trust.publicKey, (ver) => fetchSigned(base, id, ver, "approval.json"), version,
+    { requireReviewPass: trust.requireReviewPass, getReview: (ver) => fetchSigned(base, id, ver, "review.json") });
   if (!pick) throw new Error(`No installable version of ${id}: ${reason ?? "none"}`);
   return pick;
+}
+
+/** Verdict of the signed review for one version: "pass" | "findings" | "fail" | "error", "invalid" if the record does not verify, null if none. */
+export async function reviewStatus(base: string, id: string, entry: VersionEntry, trust: Trust): Promise<string | null> {
+  const s = await fetchSigned(base, id, entry.version, "review.json");
+  if (!s) return null;
+  if (!trust.publicKey) return "unverified";
+  const r = await checkReview(s.bytes, s.sig, trust.publicKey, { id, version: entry.version, actual: entry.sha256 });
+  return r.ok ? r.record.review.verdict : "invalid";
 }
 
 export async function install(app: App, base: string, id: string, trust: Trust, version?: string): Promise<{ version: string; approved: boolean }> {

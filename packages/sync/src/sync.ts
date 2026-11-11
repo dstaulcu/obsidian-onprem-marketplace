@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { addEntry, promoteStaged, type PublishPolicy } from "./catalog";
 import {
   compareSemver, validateManifest, type IndexEntry, type PluginManifest, type VersionEntry,
 } from "@om/shared";
@@ -23,6 +24,8 @@ export interface Config {
   outDir: string;
   /** Default cap on newest releases mirrored per repo; omit for no cap. */
   maxVersions?: number;
+  /** Which versions clients can see: all (default), reviewed-pass, or approved. Others are staged until they qualify. */
+  publishPolicy?: PublishPolicy;
   /** Optional automated review of newly mirrored versions (needs ANTHROPIC_API_KEY in the environment). */
   review?: ReviewConfig;
   repos: RepoConfig[];
@@ -106,11 +109,7 @@ export async function syncRegistry(cfg: Config, f: Fetcher): Promise<SyncResult>
             sha256: { main: sha(mainBytes), manifest: sha(manifestBytes), styles: stylesBytes ? sha(stylesBytes) : "" },
             hasStyles: !!stylesBytes,
           };
-          const vpath = join(pluginsDir, manifest.id, "versions.json");
-          const versions: VersionEntry[] = (await exists(vpath)) ? JSON.parse(await readFile(vpath, "utf8")) : [];
-          versions.push(entry);
-          versions.sort((a, b) => compareSemver(b.version, a.version));
-          await writeFile(vpath, JSON.stringify(versions, null, 2));
+          await addEntry(join(pluginsDir, manifest.id), entry, cfg.publishPolicy ?? "all");
           res.added.push(label);
           res.addedVersions.push({ id: manifest.id, version: manifest.version });
         } catch (e) { if (e instanceof RateLimitError) throw e; res.errors.push(`${label}: ${(e as Error).message}`); }

@@ -116,29 +116,40 @@ verification fail. The modal shows an approved / not approved badge and a link t
 ```
 om-sync keygen keys                          # once
 om-sync review <id@version | --all>          # needs ANTHROPIC_API_KEY
-om-sync approve <id@version> --key keys/signing-key.pem
+om-sync approve <id@version> --key keys/signing-key.pem [--override "reason"]
 node scripts/bootstrap-vault.mjs <vault> <registryUrl> keys/public-key.txt   # pins the key, require-signed
 ```
+
+## Filtering on reviewed-and-passed versions
+
+Four layers, each optional and independent:
+
+| Layer | Where | Setting | Effect |
+|---|---|---|---|
+| Admin gate | `om-sync approve` | always on; `--override "reason"` | Refuses to approve unless a review record **for exactly these file hashes** has verdict `pass`. An override is allowed with a stated reason, which is recorded (with the review verdict) inside the signed approval. |
+| Publish policy | `registry.config.json` | `"publishPolicy": "all" \| "reviewed-pass" \| "approved"` | New versions are held in `plugins/<id>/staged.json` (not served to clients) until they qualify, then promoted into `versions.json` and `index.json` automatically after sync, `review` or `approve`. |
+| Client enforcement | marketplace plugin | **Also require a passing review** | Installs only versions that are approved **and** have a signed review record, matching the same hashes, with verdict `pass`. Holds even if an admin overrode the gate. |
+| Client display | marketplace plugin | **Hide unapproved plugins** | Hides plugins whose latest version is not approved (installed ones stay visible). Display only; `require-signed` still does the blocking. |
+
+```mermaid
+flowchart LR
+    M["mirrored version"] --> P{"publishPolicy"}
+    P -- all --> V["versions.json (visible)"]
+    P -- "reviewed-pass / approved" --> S["staged.json (hidden)"]
+    S -- "review pass / approval" --> V
+    V --> C["client: require-signed [+ require passing review]"]
+```
+
+The modal shows each plugin's approval state and the **verified** review verdict (`pass`, `findings`, `fail`,
+`error`, or "Not reviewed"). The report link appears only when a signed review exists. A review record that does not
+verify under the pinned key is shown as `invalid`, never as a pass.
+
+Recommended work setup: `publishPolicy: "reviewed-pass"`, `require-signed` on every client, and treat `--override`
+as a rare, auditable exception.
 
 ## Not implemented yet
 
 - `index.json` is unsigned and has no expiry, so a compromised web server can hide new versions or replay old ones.
 - No revocation list for a version found bad after approval.
 - No key rotation (one pinned key).
-- Approval does not yet require a passing review; the admin decides (see "Filtering" below).
 - Issue drafts for failed releases in source repos (would be dry-run only, opt-in per repo).
-
-## Filtering on reviewed-and-passed versions
-
-Today `require-signed` filters on **approval**, and approval is an admin decision independent of the review
-verdict. Options for making "reviewed and passed" a gate, from cheapest to strongest:
-
-1. **Admin gate (server side).** `approve` refuses unless `review.json` exists, matches the hashes and has verdict
-   `pass`; an explicit override flag records the reason in the approval. Then every approved version has passed.
-2. **Client display filter.** A "hide unapproved" setting so users only see approved plugins/versions. UI only;
-   `require-signed` already blocks the install itself.
-3. **Client enforcement.** A setting that also requires a signed `review.json` with verdict `pass` bound to the same
-   hashes. This holds even if an admin approves despite findings.
-4. **Publish policy (server side).** Hold versions out of `index.json` and `versions.json` until they meet a policy
-   (`approved` or `reviewed-pass`). Cleanest for users, but needs a staging area so unreviewed versions can still be
-   reviewed.

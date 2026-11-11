@@ -68,8 +68,9 @@ forged approver names, and wrong-key approvals (all covered by tests).
 3. **Single pinned key, no rotation.** Replacing the key means re-bootstrapping vaults.
 4. **`off` and `warn` modes give integrity only.** The sha256 values come from the same registry as the files, so
    without signatures they catch corruption, not a malicious registry. Use `require-signed` for the work version.
-5. **Approval is a human decision, currently independent of the review verdict.** See the filtering options in
-   [Review, Approval & Signing](attestation.md).
+5. **Approval is a human decision.** `approve` refuses unless the exact files have a passing review, but an admin can
+   `--override` with a recorded reason; clients can additionally require a signed passing review. See
+   [Review, approval & signing](attestation.md).
 
 ## The automated review
 

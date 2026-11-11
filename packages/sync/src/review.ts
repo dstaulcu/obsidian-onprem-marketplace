@@ -7,6 +7,7 @@ import {
   compareSemver, isSafeVersion, isValidPluginId, type FileHashes, type ReviewRecord, type Verdict, type VersionEntry,
 } from "@om/shared";
 import { signBytes } from "./signing";
+import { findEntry, readPublished, readStaged } from "./catalog";
 import { diffReports, hasHigh, scanSource, type StaticReport } from "./staticchecks";
 
 export const RUBRIC_VERSION = "2";
@@ -140,8 +141,8 @@ export function renderReport(r: ReviewRecord["review"], id: string, version: str
 
 async function loadHashes(outDir: string, id: string, version: string) {
   const pdir = join(outDir, "plugins", id), vdir = join(pdir, version);
-  const versions: VersionEntry[] = JSON.parse(await readFile(join(pdir, "versions.json"), "utf8"));
-  const v = versions.find((x) => x.version === version);
+  const versions: VersionEntry[] = [...(await readPublished(pdir)), ...(await readStaged(pdir))];
+  const v = await findEntry(pdir, version);
   if (!v) throw new Error(`${id}@${version} is not in the registry`);
   const main = await readFile(join(vdir, "main.js"));
   const manifest = await readFile(join(vdir, "manifest.json"));
