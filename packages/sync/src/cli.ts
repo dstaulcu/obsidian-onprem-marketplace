@@ -1,7 +1,8 @@
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { makeFetcher, syncRegistry, type Config } from "./sync";
 import { approveVersion, generateKeys } from "./signing";
+import { claudeReviewer, reviewVersion } from "./review";
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -25,6 +26,15 @@ if (cmd === "keygen") {
   const by = flag("by", process.env.USERNAME ?? process.env.USER ?? "admin")!;
   const a = await approveVersion(flag("registry", "registry")!, id, version, await readFile(keyPath, "utf8"), by);
   console.log(`approved ${a.id}@${a.version} by ${a.approvedBy}`);
+} else if (cmd === "review") {
+  // om-sync review <id@version | --all> [--config registry.config.json]
+  const flag = (n: string, d?: string) => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : d; };
+  const cfg = JSON.parse(await readFile(flag("config", "registry.config.json")!, "utf8")) as Config;
+  if (!cfg.review) { console.error("no \"review\" section in config"); process.exit(2); }
+  let targets: { id: string; version: string }[];
+  if (rest.includes("--all")) targets = await allVersions(cfg.outDir);
+  else { const [id, version] = (rest[0] ?? "").split("@"); if (!id || !version) { console.error("usage: review <id@version | --all>"); process.exit(2); } targets = [{ id, version }]; }
+  await runReviews(cfg, targets);
 } else {
   const cfgPath = cmd ?? "registry.config.json";
   const cfg = JSON.parse(await readFile(cfgPath, "utf8")) as Config;
@@ -33,5 +43,31 @@ if (cmd === "keygen") {
   console.log(`added ${r.added.length}, skipped ${r.skipped.length}, errors ${r.errors.length}`);
   r.added.forEach((a) => console.log("  + " + a));
   r.errors.forEach((e) => console.error("  ! " + e));
+  // Review problems are reported but never change the exit code (a flagged version must not keep a schedule red).
+  if (cfg.review?.enabled) await runReviews(cfg, r.addedVersions);
   process.exit(r.errors.length ? 1 : 0);
+}
+
+async function allVersions(outDir: string) {
+  const out: { id: string; version: string }[] = [];
+  for (const id of await readdir(join(outDir, "plugins"))) {
+    try { for (const v of JSON.parse(await readFile(join(outDir, "plugins", id, "versions.json"), "utf8"))) out.push({ id, version: v.version }); } catch { /* skip */ }
+  }
+  return out;
+}
+
+async function runReviews(cfg: Config, targets: { id: string; version: string }[]) {
+  const rc = cfg.review!;
+  if (!process.env.ANTHROPIC_API_KEY) { console.error("review: ANTHROPIC_API_KEY is not set; skipping reviews"); return; }
+  const reviewer = claudeReviewer({ claudePath: rc.claudePath, model: rc.model, maxBudgetUsd: rc.maxBudgetUsd });
+  const privatePem = rc.signingKeyPath ? await readFile(rc.signingKeyPath, "utf8") : undefined;
+  let started = 0;
+  for (const t of targets) {
+    if (rc.maxReviewsPerRun && started >= rc.maxReviewsPerRun) { console.log(`review: reached maxReviewsPerRun (${rc.maxReviewsPerRun}); rest next run`); break; }
+    try {
+      const o = await reviewVersion(cfg.outDir, t.id, t.version, reviewer, { privatePem, model: rc.model });
+      if (o.status === "reviewed") started++;
+      console.log(`  review ${o.status} ${t.id}@${t.version}: ${o.verdict}`);
+    } catch (e) { console.error(`  review failed ${t.id}@${t.version}: ${(e as Error).message}`); }
+  }
 }

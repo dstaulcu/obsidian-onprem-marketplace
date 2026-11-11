@@ -6,12 +6,25 @@ import {
 } from "@om/shared";
 
 export interface RepoConfig { repo: string; pinVersions?: string[]; /** Mirror only the newest N eligible releases (overrides Config.maxVersions). */ maxVersions?: number; }
+export interface ReviewConfig {
+  enabled?: boolean;
+  /** Full path to the Claude Code executable. */
+  claudePath: string;
+  model?: string;
+  maxBudgetUsd?: number;
+  /** Cap on reviews started per run, to bound spend. */
+  maxReviewsPerRun?: number;
+  /** Path to the signing private key; when set, review records are signed. Never put key material in config. */
+  signingKeyPath?: string;
+}
 export interface Config {
   githubApiBase: string;
   tokenEnv?: string;
   outDir: string;
   /** Default cap on newest releases mirrored per repo; omit for no cap. */
   maxVersions?: number;
+  /** Optional automated review of newly mirrored versions (needs ANTHROPIC_API_KEY in the environment). */
+  review?: ReviewConfig;
   repos: RepoConfig[];
 }
 interface Asset { name: string; url: string; }
@@ -48,10 +61,10 @@ async function getBytes(f: Fetcher, url: string): Promise<Uint8Array> {
   return new Uint8Array(await r.arrayBuffer());
 }
 
-export interface SyncResult { added: string[]; skipped: string[]; errors: string[]; }
+export interface SyncResult { added: string[]; skipped: string[]; errors: string[]; addedVersions: { id: string; version: string }[]; }
 
 export async function syncRegistry(cfg: Config, f: Fetcher): Promise<SyncResult> {
-  const res: SyncResult = { added: [], skipped: [], errors: [] };
+  const res: SyncResult = { added: [], skipped: [], errors: [], addedVersions: [] };
   const pluginsDir = join(cfg.outDir, "plugins");
   await mkdir(pluginsDir, { recursive: true });
   const repoOfPlugin: Record<string, string> = {};
@@ -99,6 +112,7 @@ export async function syncRegistry(cfg: Config, f: Fetcher): Promise<SyncResult>
           versions.sort((a, b) => compareSemver(b.version, a.version));
           await writeFile(vpath, JSON.stringify(versions, null, 2));
           res.added.push(label);
+          res.addedVersions.push({ id: manifest.id, version: manifest.version });
         } catch (e) { if (e instanceof RateLimitError) throw e; res.errors.push(`${label}: ${(e as Error).message}`); }
       }
     } catch (e) {

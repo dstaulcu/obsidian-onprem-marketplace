@@ -17,6 +17,27 @@ export interface Approval {
   approvedAt: string;
 }
 
+/** Signed record of an automated review. Produced for every reviewed version, whatever the verdict. */
+export interface ReviewRecord {
+  schema: 1;
+  id: string;
+  version: string;
+  sha256: FileHashes;
+  review: {
+    type: string;
+    model: string;
+    rubricVersion: string;
+    promptSha256: string;
+    scope: string[];
+    verdict: Verdict;
+    /** Path relative to the version directory; the report is bound by reportSha256. */
+    reportPath: string;
+    reportSha256: string;
+    reviewedAt: string;
+    costUsd?: number;
+  };
+}
+
 function b64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   const bin = atob(b64.trim());
   const out = new Uint8Array(new ArrayBuffer(bin.length));
