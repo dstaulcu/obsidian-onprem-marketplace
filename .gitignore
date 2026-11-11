@@ -8,3 +8,9 @@ packages/plugin/main.js
 *.key
 keys/
 signing-key*
+
+# demo outputs
+demo/registry/
+demo/vault/
+demo/keys/
+demo/tamper-backup/

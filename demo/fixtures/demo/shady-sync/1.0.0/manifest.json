@@ -1,0 +1,9 @@
+{
+  "id": "shady-sync",
+  "name": "Shady Sync",
+  "version": "1.0.0",
+  "minAppVersion": "1.5.0",
+  "description": "Keeps your notes in sync. (Demo fixture: inert.)",
+  "author": "Demo Author",
+  "isDesktopOnly": true
+}

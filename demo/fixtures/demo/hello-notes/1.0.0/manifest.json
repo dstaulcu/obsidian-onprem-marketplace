@@ -1,0 +1,9 @@
+{
+  "id": "hello-notes",
+  "name": "Hello Notes",
+  "version": "1.0.0",
+  "minAppVersion": "1.5.0",
+  "description": "Adds a command that inserts today's date into the current note.",
+  "author": "Demo Author",
+  "isDesktopOnly": false
+}
