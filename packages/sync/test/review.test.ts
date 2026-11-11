@@ -59,7 +59,7 @@ describe("reviewVersion", () => {
     const bytes = await readFile(join(vdir, "review.json"));
     expect(await verifySignature(bytes, await readFile(join(vdir, "review.json.sig"), "utf8"), k.publicSpkiB64)).toBe(true);
     const rec = JSON.parse(bytes.toString()) as ReviewRecord;
-    expect(rec.review.reportSha256).toBe(sha(await readFile(join(vdir, "review.md"), "utf8")));
+    expect(rec.review.reportSha256).toBe(sha(await readFile(join(vdir, "review.html"), "utf8")));
     expect(rec.review.model).toBe("test-model");
   });
 
@@ -78,9 +78,22 @@ describe("reviewVersion", () => {
     expect(o.verdict).toBe("error");
     const bad = { verdict: "findings", summary: "<img src=x onerror=alert(1)>", findings: [] };
     await reviewVersion(out, "demo", "1.0.0", reviewerOf(bad), { rubricVersion: "2" });
-    const md = await readFile(join(vdir, "review.md"), "utf8");
+    const md = await readFile(join(vdir, "review.html"), "utf8");
     expect(md).not.toContain("<img");
     expect(md).toContain("&lt;img");
+  });
+
+  it("sends the full source for small bundles and flags partial coverage for large ones", async () => {
+    let seen = "";
+    const spy: Reviewer = async (p) => { seen = p; return { output: passModel, model: "m" }; };
+    const small = await fixture("const marker = 12345;");
+    await reviewVersion(small.out, "demo", "1.0.0", spy, { rubricVersion: "t" });
+    expect(seen).toContain("const marker = 12345;");
+    const big = await fixture("x".repeat(70_000));
+    await reviewVersion(big.out, "demo", "1.0.0", spy, { rubricVersion: "t" });
+    expect(seen).not.toContain("x".repeat(1000));
+    const html = await readFile(join(big.vdir, "review.html"), "utf8");
+    expect(html).toContain("PARTIAL");
   });
 
   it("refuses to review files that do not match versions.json", async () => {

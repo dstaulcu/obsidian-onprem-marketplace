@@ -19,7 +19,7 @@ export async function fetchVersions(base: string, id: string): Promise<VersionEn
   return all.filter((v) => isSafeVersion(v?.version));
 }
 
-export const reportUrl = (base: string, id: string, version: string) => join(base, `plugins/${id}/${version}/review.md`);
+export const reportUrl = (base: string, id: string, version: string) => join(base, `plugins/${id}/${version}/review.html`);
 
 /** Fetches a signed document and its detached signature; null if either is missing. */
 export async function fetchSigned(base: string, id: string, version: string, name: string): Promise<Signed | null> {

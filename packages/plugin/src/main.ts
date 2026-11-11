@@ -92,10 +92,14 @@ class MarketplaceModal extends Modal {
       const s = new Setting(this.listEl).setName(`${e.name} (${e.latestVersion})`)
         .setDesc(`${e.description} — ${e.author}${cur ? ` · installed ${cur}` : ""}${blocked ? ` · ${blocked}` : ""}`);
       if (this.plugin.settings.trustMode !== "off") {
-        const ok = this.approved.get(e.id);
-        s.descEl.createSpan({ text: ok ? " · approved" : " · NOT approved" });
-        s.descEl.createSpan({ text: " · " });
-        s.descEl.createEl("a", { text: "review report", href: reportUrl(this.plugin.settings.registryUrl, e.id, e.latestVersion) });
+        const ok = !!this.approved.get(e.id);
+        const badge = s.nameEl.createSpan({ text: ok ? "approved" : "not approved" });
+        badge.setCssStyles({
+          marginLeft: "8px", padding: "1px 8px", borderRadius: "999px", fontSize: "var(--font-ui-smaller)", fontWeight: "600",
+          border: "1px solid currentColor", color: ok ? "var(--color-green)" : "var(--color-orange)",
+        });
+        s.descEl.createEl("br");
+        s.descEl.createEl("a", { text: "Review report", href: reportUrl(this.plugin.settings.registryUrl, e.id, e.latestVersion) });
       }
       const hasUpdate = cur !== null && cur !== e.latestVersion;
       if (!blocked && (cur === null || hasUpdate))
