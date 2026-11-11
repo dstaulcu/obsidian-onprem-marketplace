@@ -3,6 +3,14 @@
   "tokenEnv": "GITHUB_TOKEN",
   "outDir": "registry",
   "maxVersions": 5,
+  "review": {
+    "enabled": false,
+    "claudePath": "C:\\Users\\david\\.local\\bin\\claude.exe",
+    "model": "claude-sonnet-5-5",
+    "maxBudgetUsd": 0.5,
+    "maxReviewsPerRun": 5,
+    "signingKeyPath": "keys/signing-key.pem"
+  },
   "repos": [
     { "repo": "dstaulcu/test-plugin" },
     { "repo": "dstaulcu/obsidian-tag-registry-client" },

@@ -1,6 +1,8 @@
 import type { App, PluginManifest } from "obsidian";
-import { compareSemver, isValidPluginId, type IndexEntry } from "@om/shared";
-import { fetchFile, fetchVersions, sha256Hex } from "./registry";
+import { compareSemver, isValidPluginId, selectVersion, type IndexEntry, type TrustMode, type VersionEntry } from "@om/shared";
+import { fetchFile, fetchSigned, fetchVersions, sha256Hex } from "./registry";
+
+export interface Trust { mode: TrustMode; publicKey: string }
 
 /**
  * All use of Obsidian's undocumented plugin-manager internals (app.plugins) is confined here,
@@ -25,11 +27,17 @@ export function isCompatible(entry: IndexEntry, appVersion: string, isMobile: bo
   return null;
 }
 
-export async function install(app: App, base: string, id: string, version?: string): Promise<string> {
+/** Picks the version to install under the trust policy (newest approved in require-signed mode). */
+export async function resolveVersion(base: string, id: string, trust: Trust, version?: string): Promise<{ entry: VersionEntry; approved: boolean }> {
   if (!isValidPluginId(id)) throw new Error(`Invalid plugin id: ${id}`);
-  const versions = await fetchVersions(base, id);
-  const v = version ? versions.find((x) => x.version === version) : versions[0];
-  if (!v) throw new Error(`No such version for ${id}`);
+  const versions = (await fetchVersions(base, id)).sort((a, b) => compareSemver(b.version, a.version));
+  const { pick, reason } = await selectVersion(id, versions, trust.mode, trust.publicKey, (ver) => fetchSigned(base, id, ver, "approval.json"), version);
+  if (!pick) throw new Error(`No installable version of ${id}: ${reason ?? "none"}`);
+  return pick;
+}
+
+export async function install(app: App, base: string, id: string, trust: Trust, version?: string): Promise<{ version: string; approved: boolean }> {
+  const { entry: v, approved } = await resolveVersion(base, id, trust, version);
 
   const files: [string, string, ArrayBuffer][] = [];
   const names: [string, string, string][] = [["main.js", "main", v.sha256.main], ["manifest.json", "manifest", v.sha256.manifest]];
@@ -50,7 +58,7 @@ export async function install(app: App, base: string, id: string, version?: stri
 
   await mgr(app).loadManifests();
   await mgr(app).enablePluginAndSave(id);
-  return v.version;
+  return { version: v.version, approved };
 }
 
 export async function uninstall(app: App, id: string): Promise<void> {

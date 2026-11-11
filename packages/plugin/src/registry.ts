@@ -1,5 +1,5 @@
 import { requestUrl } from "obsidian";
-import { isSafeVersion, isValidPluginId, type IndexEntry, type VersionEntry } from "@om/shared";
+import { isSafeVersion, isValidPluginId, type IndexEntry, type Signed, type VersionEntry } from "@om/shared";
 
 const join = (base: string, path: string) => base.replace(/\/+$/, "") + "/" + path;
 
@@ -17,6 +17,17 @@ export async function fetchVersions(base: string, id: string): Promise<VersionEn
   if (!isValidPluginId(id)) throw new Error(`Invalid plugin id: ${id}`);
   const all = await getJson<VersionEntry[]>(join(base, `plugins/${id}/versions.json`));
   return all.filter((v) => isSafeVersion(v?.version));
+}
+
+export const reportUrl = (base: string, id: string, version: string) => join(base, `plugins/${id}/${version}/review.md`);
+
+/** Fetches a signed document and its detached signature; null if either is missing. */
+export async function fetchSigned(base: string, id: string, version: string, name: string): Promise<Signed | null> {
+  try {
+    const doc = await requestUrl({ url: join(base, `plugins/${id}/${version}/${name}`) });
+    const sig = await requestUrl({ url: join(base, `plugins/${id}/${version}/${name}.sig`) });
+    return { bytes: new Uint8Array(doc.arrayBuffer), sig: sig.text };
+  } catch { return null; }
 }
 
 export async function fetchFile(base: string, id: string, version: string, name: string): Promise<ArrayBuffer> {

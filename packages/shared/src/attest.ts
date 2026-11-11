@@ -72,3 +72,31 @@ export async function checkApproval(
     if (a.sha256?.[k] !== expect.actual[k]) return { ok: false, reason: `${k} differs from what was approved` };
   return { ok: true, approval: a };
 }
+
+export type TrustMode = "off" | "warn" | "require-signed";
+export interface Signed { bytes: Uint8Array<ArrayBuffer>; sig: string }
+export interface Pick<V extends { version: string; sha256: FileHashes }> { entry: V; approved: boolean }
+
+/**
+ * Chooses which version to install. `versions` must be newest first. In require-signed mode only a version
+ * whose signed approval matches the registry's listed hashes is eligible (and the caller then verifies the
+ * downloaded files against those same hashes); with no pinned key nothing is eligible (fail closed).
+ */
+export async function selectVersion<V extends { version: string; sha256: FileHashes }>(
+  id: string, versions: V[], mode: TrustMode, publicKey: string,
+  getApproval: (version: string) => Promise<Signed | null>, wanted?: string,
+): Promise<{ pick: Pick<V> | null; reason?: string }> {
+  const candidates = wanted ? versions.filter((v) => v.version === wanted) : versions;
+  if (!candidates.length) return { pick: null, reason: "no such version" };
+  if (mode === "off") return { pick: { entry: candidates[0], approved: false } };
+  if (!publicKey) return mode === "require-signed" ? { pick: null, reason: "no public key pinned" } : { pick: { entry: candidates[0], approved: false } };
+  let lastReason = "no approved version";
+  for (const v of candidates) {
+    const s = await getApproval(v.version).catch(() => null);
+    const r = s ? await checkApproval(s.bytes, s.sig, publicKey, { id, version: v.version, actual: v.sha256 }) : null;
+    if (r?.ok) return { pick: { entry: v, approved: true } };
+    lastReason = r ? r.reason : "not approved";
+    if (mode === "warn") return { pick: { entry: candidates[0], approved: false }, reason: lastReason };
+  }
+  return { pick: null, reason: lastReason };
+}

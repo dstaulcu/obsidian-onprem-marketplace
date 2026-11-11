@@ -1,10 +1,10 @@
 import { App, Modal, Notice, Platform, Plugin, PluginSettingTab, Setting, apiVersion } from "obsidian";
-import type { IndexEntry } from "@om/shared";
-import { fetchIndex } from "./registry";
-import { install, installedVersion, isCompatible, uninstall, updatesAvailable } from "./installer";
+import { compareSemver, type IndexEntry, type TrustMode } from "@om/shared";
+import { fetchIndex, reportUrl } from "./registry";
+import { install, installedVersion, isCompatible, resolveVersion, uninstall, updatesAvailable, type Trust } from "./installer";
 
-interface Settings { registryUrl: string; checkIntervalMinutes: number; }
-const DEFAULTS: Settings = { registryUrl: "https://obsidian-registry.example.internal", checkIntervalMinutes: 240 };
+interface Settings { registryUrl: string; checkIntervalMinutes: number; trustMode: TrustMode; publicKey: string; }
+const DEFAULTS: Settings = { registryUrl: "https://obsidian-registry.example.internal", checkIntervalMinutes: 240, trustMode: "off", publicKey: "" };
 
 export default class InternalMarketplace extends Plugin {
   settings!: Settings;
@@ -35,18 +35,27 @@ export default class InternalMarketplace extends Plugin {
     try {
       const updates = updatesAvailable(this.app, await fetchIndex(this.settings.registryUrl));
       for (const u of updates) {
-        try { await install(this.app, this.settings.registryUrl, u.id); new Notice(`Updated ${u.name} to ${u.latestVersion}`); }
+        try {
+          const cur = installedVersion(this.app, u.id);
+          const target = await resolveVersion(this.settings.registryUrl, u.id, this.trust);
+          if (cur && compareSemver(target.entry.version, cur) <= 0) continue; // newest approved is not newer than what is installed
+          const r = await install(this.app, this.settings.registryUrl, u.id, this.trust, target.entry.version);
+          new Notice(`Updated ${u.name} to ${r.version}${r.approved || this.settings.trustMode === "off" ? "" : " (not approved)"}`);
+        }
         catch (e) { new Notice(`Failed to update ${u.name}: ${(e as Error).message}`, 10000); }
       }
       if (!updates.length) new Notice("All internal plugins are up to date.");
     } catch (e) { new Notice(`Registry unreachable: ${(e as Error).message}`); }
   }
 
+  get trust(): Trust { return { mode: this.settings.trustMode, publicKey: this.settings.publicKey }; }
+
   saveSettings() { return this.saveData(this.settings); }
 }
 
 class MarketplaceModal extends Modal {
   private entries: IndexEntry[] = [];
+  private approved = new Map<string, boolean>();
   private query = "";
   constructor(app: App, private plugin: InternalMarketplace) { super(app); }
 
@@ -57,7 +66,17 @@ class MarketplaceModal extends Modal {
       s.setPlaceholder("Search plugins").onChange((v) => { this.query = v.toLowerCase(); this.render(); }));
     this.listEl = this.contentEl.createDiv();
     this.listEl.setText("Loading…");
-    try { this.entries = await fetchIndex(this.plugin.settings.registryUrl); this.render(); }
+    try {
+      this.entries = await fetchIndex(this.plugin.settings.registryUrl);
+      if (this.plugin.settings.trustMode !== "off") {
+        const t = this.plugin.trust;
+        await Promise.all(this.entries.map(async (e) => {
+          try { this.approved.set(e.id, (await resolveVersion(this.plugin.settings.registryUrl, e.id, { ...t, mode: "warn" }, e.latestVersion)).approved); }
+          catch { this.approved.set(e.id, false); }
+        }));
+      }
+      this.render();
+    }
     catch (e) { this.listEl.setText(`Could not reach registry: ${(e as Error).message}`); }
   }
 
@@ -72,11 +91,20 @@ class MarketplaceModal extends Modal {
       const blocked = isCompatible(e, apiVersion, Platform.isMobile);
       const s = new Setting(this.listEl).setName(`${e.name} (${e.latestVersion})`)
         .setDesc(`${e.description} — ${e.author}${cur ? ` · installed ${cur}` : ""}${blocked ? ` · ${blocked}` : ""}`);
+      if (this.plugin.settings.trustMode !== "off") {
+        const ok = this.approved.get(e.id);
+        s.descEl.createSpan({ text: ok ? " · approved" : " · NOT approved" });
+        s.descEl.createSpan({ text: " · " });
+        s.descEl.createEl("a", { text: "review report", href: reportUrl(this.plugin.settings.registryUrl, e.id, e.latestVersion) });
+      }
       const hasUpdate = cur !== null && cur !== e.latestVersion;
       if (!blocked && (cur === null || hasUpdate))
         s.addButton((b) => b.setButtonText(cur ? "Update" : "Install").setCta().onClick(async () => {
           b.setDisabled(true);
-          try { await install(this.app, this.plugin.settings.registryUrl, e.id); new Notice(`Installed ${e.name}`); }
+          try {
+            const r = await install(this.app, this.plugin.settings.registryUrl, e.id, this.plugin.trust);
+            new Notice(`Installed ${e.name} ${r.version}${r.approved || this.plugin.settings.trustMode === "off" ? "" : " (NOT approved)"}`);
+          }
           catch (err) { new Notice(`Install failed: ${(err as Error).message}`, 10000); }
           this.render();
         }));
@@ -99,6 +127,13 @@ class SettingsTab extends PluginSettingTab {
       .addText((t) => t.setValue(this.plugin.settings.registryUrl).onChange(async (v) => { this.plugin.settings.registryUrl = v.trim(); await this.plugin.saveSettings(); }));
     new Setting(this.containerEl).setName("Update check interval (minutes)")
       .addText((t) => t.setValue(String(this.plugin.settings.checkIntervalMinutes)).onChange(async (v) => { this.plugin.settings.checkIntervalMinutes = Number(v) || DEFAULTS.checkIntervalMinutes; await this.plugin.saveSettings(); }));
+    new Setting(this.containerEl).setName("Trust mode")
+      .setDesc("off: no checks. warn: install anything but flag unapproved. require-signed: only install versions signed by the admin key.")
+      .addDropdown((d) => d.addOptions({ "off": "off", "warn": "warn", "require-signed": "require-signed" })
+        .setValue(this.plugin.settings.trustMode)
+        .onChange(async (v) => { this.plugin.settings.trustMode = v as TrustMode; await this.plugin.saveSettings(); }));
+    new Setting(this.containerEl).setName("Pinned public key").setDesc("Base64 SPKI key from public-key.txt. Set at bootstrap; never fetched from the registry.")
+      .addTextArea((t) => t.setValue(this.plugin.settings.publicKey).onChange(async (v) => { this.plugin.settings.publicKey = v.trim(); await this.plugin.saveSettings(); }));
     new Setting(this.containerEl).setName("Check for updates now").addButton((b) => b.setButtonText("Check").onClick(() => this.plugin.checkUpdates(true)));
   }
 }
