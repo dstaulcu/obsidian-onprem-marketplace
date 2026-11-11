@@ -1,0 +1,8 @@
+{
+  "githubApiBase": "https://github.example.internal/api/v3",
+  "tokenEnv": "GITHUB_TOKEN",
+  "outDir": "registry",
+  "repos": [
+    { "repo": "your-org/example-obsidian-plugin" }
+  ]
+}

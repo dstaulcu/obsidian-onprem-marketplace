@@ -1,0 +1,9 @@
+{
+  "name": "onprem-marketplace",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p . && node esbuild.config.mjs"
+  },
+  "dependencies": { "@om/shared": "*" }
+}
