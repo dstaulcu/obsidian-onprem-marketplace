@@ -1,8 +1,15 @@
 {
-  "githubApiBase": "https://github.example.internal/api/v3",
+  "githubApiBase": "https://api.github.com",
   "tokenEnv": "GITHUB_TOKEN",
   "outDir": "registry",
+  "maxVersions": 5,
   "repos": [
-    { "repo": "your-org/example-obsidian-plugin" }
+    { "repo": "dstaulcu/test-plugin" },
+    { "repo": "dstaulcu/obsidian-tag-registry-client" },
+    { "repo": "dstaulcu/obsidian-scheduled-agents"},
+    { "repo": "tu2-atmanand/Task-Board" },
+    { "repo": "glowingjade/obsidian-smart-composer" },
+    { "repo": "pjeby/tag-wrangler" },
+    { "repo": "vinzent03/obsidian-git", "maxVersions": 4 }
   ]
 }

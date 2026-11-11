@@ -91,6 +91,8 @@ plugin, so change the types first and update both sides.
 |---|---|
 | Add a plugin | Add `{ "repo": "org/name" }` to `repos`, re-run sync |
 | Hold a plugin at certain versions | `"pinVersions": ["1.2.0"]` |
+| Limit how much history is mirrored | `"maxVersions": 5` at top level, or per repo; newest N releases only |
+| Avoid GitHub rate limits | Set the token env var (5000 requests/hr vs 60 unauthenticated). Sync stops early with a clear message if the limit is hit; re-run later and it resumes (finished versions are skipped) |
 | Remove a plugin from the catalog | Remove it from config **and** delete `registry/plugins/<id>` (sync never deletes) |
 | Self-update the marketplace | Nominate its own repo; its manifest id must be `onprem-marketplace` |
 | Schedule | Task Scheduler / cron running the CLI; set the env var named by `tokenEnv` |

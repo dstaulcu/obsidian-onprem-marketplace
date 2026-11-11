@@ -61,3 +61,20 @@ describe("shared path-safety validation", () => {
     expect(validateManifest(m)).toEqual(expect.arrayContaining(["invalid id", "version not x.y.z"]));
   });
 });
+
+describe("sync limits", () => {
+  it("maxVersions mirrors only the newest N releases", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "reg-"));
+    const r = await syncRegistry({ githubApiBase: "http://gh/api", outDir, maxVersions: 1, repos: [{ repo: "o/r" }] },
+      mock(["1.1.0", "1.0.0"]));
+    expect(r.added).toEqual(["o/r@1.1.0"]);
+  });
+  it("stops the whole run on a rate limit instead of hammering", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "reg-"));
+    let calls = 0;
+    const f: Fetcher = async () => { calls++; return new Response("", { status: 403, headers: { "x-ratelimit-remaining": "0" } }); };
+    const r = await syncRegistry({ githubApiBase: "http://gh/api", outDir, repos: [{ repo: "a/a" }, { repo: "b/b" }] }, f);
+    expect(calls).toBe(1);
+    expect(r.errors[0]).toMatch(/rate limit/);
+  });
+});

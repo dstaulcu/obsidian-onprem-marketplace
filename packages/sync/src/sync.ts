@@ -5,11 +5,13 @@ import {
   compareSemver, validateManifest, type IndexEntry, type PluginManifest, type VersionEntry,
 } from "@om/shared";
 
-export interface RepoConfig { repo: string; pinVersions?: string[]; }
+export interface RepoConfig { repo: string; pinVersions?: string[]; /** Mirror only the newest N eligible releases (overrides Config.maxVersions). */ maxVersions?: number; }
 export interface Config {
   githubApiBase: string;
   tokenEnv?: string;
   outDir: string;
+  /** Default cap on newest releases mirrored per repo; omit for no cap. */
+  maxVersions?: number;
   repos: RepoConfig[];
 }
 interface Asset { name: string; url: string; }
@@ -25,14 +27,24 @@ export function makeFetcher(token?: string): Fetcher {
     fetch(url, { headers: { Accept: accept, ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
 }
 
+export class RateLimitError extends Error {}
+function fail(url: string, r: Response): never {
+  if ((r.status === 403 || r.status === 429) && r.headers.get("x-ratelimit-remaining") === "0") {
+    const reset = Number(r.headers.get("x-ratelimit-reset"));
+    const when = reset ? ` (resets ${new Date(reset * 1000).toLocaleTimeString()})` : "";
+    throw new RateLimitError(`GitHub rate limit reached${when}; set the token env var or lower maxVersions, then re-run`);
+  }
+  throw new Error(`${url} -> ${r.status}`);
+}
+
 async function getJson<T>(f: Fetcher, url: string): Promise<T> {
   const r = await f(url);
-  if (!r.ok) throw new Error(`${url} -> ${r.status}`);
+  if (!r.ok) fail(url, r);
   return (await r.json()) as T;
 }
 async function getBytes(f: Fetcher, url: string): Promise<Uint8Array> {
   const r = await f(url, "application/octet-stream");
-  if (!r.ok) throw new Error(`${url} -> ${r.status}`);
+  if (!r.ok) fail(url, r);
   return new Uint8Array(await r.arrayBuffer());
 }
 
@@ -47,10 +59,13 @@ export async function syncRegistry(cfg: Config, f: Fetcher): Promise<SyncResult>
   for (const rc of cfg.repos) {
     try {
       const releases = await getJson<Release[]>(f, `${cfg.githubApiBase}/repos/${rc.repo}/releases?per_page=100`);
+      const max = rc.maxVersions ?? cfg.maxVersions;
+      let taken = 0;
       for (const rel of releases) {
         if (rel.draft || rel.prerelease) continue;
         const tagVer = rel.tag_name.replace(/^v/, "");
         if (rc.pinVersions && !rc.pinVersions.includes(tagVer)) continue;
+        if (max && taken++ >= max) break;
         const label = `${rc.repo}@${rel.tag_name}`;
         try {
           const byName = new Map(rel.assets.map((a) => [a.name, a]));
@@ -84,9 +99,12 @@ export async function syncRegistry(cfg: Config, f: Fetcher): Promise<SyncResult>
           versions.sort((a, b) => compareSemver(b.version, a.version));
           await writeFile(vpath, JSON.stringify(versions, null, 2));
           res.added.push(label);
-        } catch (e) { res.errors.push(`${label}: ${(e as Error).message}`); }
+        } catch (e) { if (e instanceof RateLimitError) throw e; res.errors.push(`${label}: ${(e as Error).message}`); }
       }
-    } catch (e) { res.errors.push(`${rc.repo}: ${(e as Error).message}`); }
+    } catch (e) {
+      res.errors.push(`${rc.repo}: ${(e as Error).message}`);
+      if (e instanceof RateLimitError) break; // every later call would fail too
+    }
   }
   await rebuildIndex(cfg.outDir, repoOfPlugin);
   return res;
