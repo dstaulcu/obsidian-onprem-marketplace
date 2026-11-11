@@ -2,19 +2,18 @@ import { createHash } from "node:crypto";
 import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { addEntry, promoteStaged, type PublishPolicy } from "./catalog";
+import type { ProviderConfig } from "./reviewers";
 import {
   compareSemver, validateManifest, type IndexEntry, type PluginManifest, type VersionEntry,
 } from "@om/shared";
 
 export interface RepoConfig { repo: string; pinVersions?: string[]; /** Mirror only the newest N eligible releases (overrides Config.maxVersions). */ maxVersions?: number; }
-export interface ReviewConfig {
+export interface ReviewConfig extends ProviderConfig {
   enabled?: boolean;
-  /** Full path to the Claude Code executable. */
-  claudePath: string;
+  /** provider "claude-code": full path to the Claude Code executable. */
+  claudePath?: string;
   /** Folder holding rules.json and review-prompt.md (default "rubric"). An org can point this at its own rubric. */
   rubricDir?: string;
-  model?: string;
-  maxBudgetUsd?: number;
   /** Cap on reviews started per run, to bound spend. */
   maxReviewsPerRun?: number;
   /** Path to the signing private key; when set, review records are signed. Never put key material in config. */

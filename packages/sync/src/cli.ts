@@ -2,7 +2,8 @@ import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { makeFetcher, syncRegistry, type Config } from "./sync";
 import { approveVersion, generateKeys } from "./signing";
-import { claudeReviewer, reviewVersion } from "./review";
+import { reviewVersion } from "./review";
+import { makeReviewer } from "./reviewers";
 import { promoteStaged, type PublishPolicy } from "./catalog";
 import { loadRubric, renderRubricDoc, testRule } from "./rubric";
 import { rebuildIndex } from "./sync";
@@ -84,10 +85,10 @@ async function allVersions(outDir: string) {
 
 async function runReviews(cfg: Config, targets: { id: string; version: string }[]) {
   const rc = cfg.review!;
-  if (!process.env.ANTHROPIC_API_KEY) { console.error("review: ANTHROPIC_API_KEY is not set; skipping reviews"); return; }
+  if ((rc.provider ?? "claude-code") === "claude-code" && !process.env.ANTHROPIC_API_KEY) { console.error("review: ANTHROPIC_API_KEY is not set; skipping reviews"); return; }
   const rubric = await loadRubric(rc.rubricDir ?? "rubric");
   console.log(`review: rubric ${rubric.version} (${rubric.rules.length} checks)`);
-  const reviewer = claudeReviewer({ claudePath: rc.claudePath, model: rc.model, maxBudgetUsd: rc.maxBudgetUsd });
+  const reviewer = makeReviewer(rc);
   const privatePem = rc.signingKeyPath ? await readFile(rc.signingKeyPath, "utf8") : undefined;
   let started = 0;
   for (const t of targets) {

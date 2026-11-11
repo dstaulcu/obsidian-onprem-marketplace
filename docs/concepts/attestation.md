@@ -74,6 +74,41 @@ plugins) are minified; the model then sees only scan excerpts and the report say
 "nothing concerning in the evidence shown", and the report states what that evidence was. Each record also names
 the model, rubric version, prompt hash, scope and cost, so a review can be reproduced and audited.
 
+## Choosing the review model
+
+`review.provider` selects how the model is called. All providers feed the same prompt and are validated the same way
+(a model that ignores the schema produces an `error` verdict, never a pass). The model used is written into every
+record and report.
+
+| `provider` | Use when | Key settings |
+|---|---|---|
+| `claude-code` (default) | Claude Code can reach your model (Anthropic API, or an Anthropic-compatible gateway via `ANTHROPIC_BASE_URL`) | `claudePath`, `model`, `maxBudgetUsd`; needs `ANTHROPIC_API_KEY` |
+| `openai-compatible` | An OpenAI-style endpoint (`/chat/completions`) | `model`, `openai.baseUrl`, `openai.apiKeyEnv` (env var *name*), `openai.jsonMode` |
+| `wrapper` | An organization-standard harness wrapper that owns credentials and base URLs | `wrapper.command`, `wrapper.args` template, `wrapper.provider`, `wrapper.harness`, `wrapper.promptVia` |
+
+```json
+"review": { "enabled": true, "provider": "openai-compatible", "model": "your-model",
+            "openai": { "baseUrl": "https://llm.internal/v1", "apiKeyEnv": "ONPREM_LLM_KEY" } }
+```
+
+```json
+"review": { "enabled": true, "provider": "wrapper", "model": "your-model",
+            "wrapper": { "command": "C:\\tools\\llm-wrapper.exe", "provider": "onprem", "harness": "plain",
+                         "args": ["--provider", "{provider}", "--harness", "{harness}", "--model", "{model}", "--prompt", "{prompt}"] } }
+```
+
+Wrapper notes:
+
+- Placeholders in `args`: `{provider}`, `{harness}`, `{model}`, `{prompt}`, `{promptFile}`. Adjust the flag names to match the real wrapper.
+- The process is started directly, with no shell, so the prompt cannot be interpreted as commands.
+- `promptVia: "arg"` (default) puts the prompt on the command line, which Windows limits to about 32K characters, so the
+  source shown to the model is reduced (and the report says coverage is partial). Use `"stdin"` or `"file"` for
+  full-size prompts.
+- A wrapper that is a `.cmd`, `.bat` or `.ps1` file cannot be started directly; set `command` to the interpreter
+  (for example `pwsh`) and pass the script as the first argument.
+- The wrapper's output must contain the JSON verdict. Plain JSON, a fenced block, or JSON surrounded by chatter are all accepted.
+- Internal TLS certificates: set `NODE_EXTRA_CA_CERTS` on the sync host so the OpenAI-compatible provider trusts your CA.
+
 ## Keys
 
 ```mermaid

@@ -15,7 +15,10 @@ import { diffReports, hasHigh, scanSource, type StaticReport } from "./staticche
 export interface ModelFinding { severity: "high" | "medium" | "low"; title: string; detail: string; file?: string }
 export interface ModelOutput { verdict: "pass" | "findings" | "fail"; summary: string; findings: ModelFinding[] }
 /** Injectable so tests never call a model. `output` is untrusted and validated here. */
-export type Reviewer = (prompt: string) => Promise<{ output: unknown; model: string; costUsd?: number }>;
+export type Reviewer = ((prompt: string) => Promise<{ output: unknown; model: string; costUsd?: number }>) & {
+  /** Hard cap on prompt size for transports with limits (e.g. command-line arguments). */
+  maxPromptChars?: number;
+};
 
 export interface ReviewOptions { rubric: Rubric; privatePem?: string; model?: string }
 export type ReviewOutcome = { status: "reviewed" | "skipped"; verdict: Verdict; id: string; version: string };
@@ -67,8 +70,8 @@ export function combineVerdict(stat: StaticReport, model: ModelOutput | null): V
 /** Full source goes to the model only below this size; bigger bundles get scan excerpts and the report says so. */
 export const FULL_SOURCE_LIMIT = 60_000;
 
-export function buildPrompt(id: string, version: string, manifest: string, stat: StaticReport, changes: string[], source: string, criteria: string): string {
-  const full = source.length <= FULL_SOURCE_LIMIT;
+export function buildPrompt(id: string, version: string, manifest: string, stat: StaticReport, changes: string[], source: string, criteria: string, limit = FULL_SOURCE_LIMIT): string {
+  const full = source.length <= limit;
   const rules = stat.findings.map((f) =>
     `- [${f.severity}] ${f.title}: ${f.count} hit(s)\n` + f.samples.map((s) => `    line ${s.line}: ${s.snippet}`).join("\n")).join("\n") || "(none)";
   return [
@@ -171,12 +174,13 @@ export async function reviewVersion(outDir: string, id: string, version: string,
     } catch { /* unreadable record: review again */ }
   }
 
+  const limit = Math.min(FULL_SOURCE_LIMIT, Math.max(0, (reviewer.maxPromptChars ?? Infinity) - 8_000));
   const stat = scanSource(main, opts.rubric.rules);
   const prev = versions.filter((v) => compareSemver(v.version, version) < 0).sort((a, b) => compareSemver(b.version, a.version))[0];
   let prevReport: StaticReport | null = null;
   if (prev) { try { prevReport = scanSource(await readFile(join(outDir, "plugins", id, prev.version, "main.js"), "utf8"), opts.rubric.rules); } catch { /* none */ } }
-  const prompt = buildPrompt(id, version, manifest, stat, diffReports(prevReport, stat), main, opts.rubric.prompt);
-  const coverage = main.length <= FULL_SOURCE_LIMIT ? "full" : "partial";
+  const prompt = buildPrompt(id, version, manifest, stat, diffReports(prevReport, stat), main, opts.rubric.prompt, limit);
+  const coverage = main.length <= limit ? "full" : "partial";
 
   let model: ModelOutput | null = null, modelName = opts.model ?? "unknown", cost: number | undefined, note: string | undefined;
   try {
