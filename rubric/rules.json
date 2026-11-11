@@ -1,0 +1,85 @@
+{
+  "name": "default",
+  "rules": [
+    {
+      "id": "eval",
+      "title": "Runs strings as code (eval)",
+      "severity": "high",
+      "pattern": "\\beval\\s*\\(",
+      "why": "eval executes arbitrary text as code, which is the usual way to hide what a plugin really does from review.",
+      "examples": { "match": ["const x = eval(\"1+1\")"], "noMatch": ["retrieval(items)", "evaluate(x)"] }
+    },
+    {
+      "id": "new-function",
+      "title": "Builds functions from strings (new Function)",
+      "severity": "high",
+      "pattern": "\\bnew\\s+Function\\s*\\(",
+      "why": "Same risk as eval: code that does not exist in the file until it runs.",
+      "examples": { "match": ["new Function(\"return 1\")"], "noMatch": ["class FunctionalWidget {}"] }
+    },
+    {
+      "id": "child-process",
+      "title": "Starts other programs (child_process)",
+      "severity": "high",
+      "pattern": "child_process",
+      "why": "Lets a plugin run any program on the user's machine with the user's privileges, far outside what a note-taking plugin needs.",
+      "examples": { "match": ["require(\"child_process\")", "require('node:child_process')"], "noMatch": ["// child process docs"] }
+    },
+    {
+      "id": "dynamic-load",
+      "title": "Loads code chosen at runtime (dynamic require/import)",
+      "severity": "high",
+      "pattern": "\\b(?:require|import)\\s*\\(\\s*[^\"'`\\s)]",
+      "why": "A literal module name can be reviewed; a computed one can load anything, including code fetched later.",
+      "examples": { "match": ["require(name)", "import(url)"], "noMatch": ["require(\"fs\")", "import('./x.js')"] }
+    },
+    {
+      "id": "electron",
+      "title": "Reaches into Electron internals",
+      "severity": "high",
+      "pattern": "require\\(\\s*[\"']electron[\"']\\s*\\)|@electron/remote",
+      "why": "Direct Electron access can bypass Obsidian's API boundaries (windows, shell, clipboard, OS integration).",
+      "examples": { "match": ["require(\"electron\")", "from \"@electron/remote\""], "noMatch": ["electronics store"] }
+    },
+    {
+      "id": "native",
+      "title": "Uses native bindings (process.binding / .node addon)",
+      "severity": "high",
+      "pattern": "process\\.binding|\\.node[\"']\\s*\\)",
+      "why": "Native code cannot be reviewed as JavaScript.",
+      "examples": { "match": ["process.binding(\"fs\")", "require(\"./x.node\")"], "noMatch": ["process.env.HOME"] }
+    },
+    {
+      "id": "node-fs",
+      "title": "Uses Node file system directly",
+      "severity": "medium",
+      "pattern": "require\\(\\s*[\"'](?:node:)?fs(?:/promises)?[\"']\\s*\\)",
+      "why": "Node fs can read and write outside the vault. Plugins should normally use Obsidian's vault API. Listed for a human to judge.",
+      "examples": { "match": ["require(\"fs\")", "require(\"node:fs/promises\")"], "noMatch": ["require(\"fsevents\")"] }
+    },
+    {
+      "id": "network",
+      "title": "Makes network requests",
+      "severity": "medium",
+      "pattern": "\\bfetch\\s*\\(|XMLHttpRequest|WebSocket|\\brequestUrl\\s*\\(|\\bnavigator\\.sendBeacon",
+      "why": "Any network call can send vault content out. Many legitimate plugins do this; the referenced hosts are listed so a human can check them.",
+      "examples": { "match": ["fetch(\"/a\")", "new WebSocket(u)", "requestUrl({url})"], "noMatch": ["prefetchData()", "fetchData(1)"] }
+    },
+    {
+      "id": "credentials",
+      "title": "Touches cookies or credential stores",
+      "severity": "medium",
+      "pattern": "document\\.cookie|\\bkeytar\\b|safeStorage",
+      "why": "Reading cookies or the OS credential store is rarely needed by a plugin and is a common theft target.",
+      "examples": { "match": ["document.cookie", "require(\"keytar\")"], "noMatch": ["cookiejar"] }
+    },
+    {
+      "id": "obfuscation",
+      "title": "Looks obfuscated (large encoded blobs)",
+      "severity": "medium",
+      "pattern": "String\\.fromCharCode\\s*\\([^)]{80,}\\)|atob\\s*\\(\\s*[\"'][A-Za-z0-9+/=]{200,}",
+      "why": "Big encoded strings decoded at runtime are a standard way to hide a payload.",
+      "examples": { "match": ["atob(\"<<A*250>>\")"], "noMatch": ["atob(\"aGVsbG8=\")"] }
+    }
+  ]
+}

@@ -11,6 +11,8 @@ export interface ReviewConfig {
   enabled?: boolean;
   /** Full path to the Claude Code executable. */
   claudePath: string;
+  /** Folder holding rules.json and review-prompt.md (default "rubric"). An org can point this at its own rubric. */
+  rubricDir?: string;
   model?: string;
   maxBudgetUsd?: number;
   /** Cap on reviews started per run, to bound spend. */

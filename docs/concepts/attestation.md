@@ -42,6 +42,10 @@ Files written per version under `registry/plugins/<id>/<version>/`:
 
 ## The review
 
+What is checked is defined in the **rubric**, which is readable data (`rubric/`) that anyone can extend by pull
+request; see [The review rubric](rubric.md). Every report lists each check performed (hits and clear ones) and the
+rubric version.
+
 Run on newly mirrored versions during sync (set `"review": { "enabled": true, ... }`) or on demand with
 `om-sync review <id@version | --all>`. A version already reviewed with the same hashes, model and rubric version is
 skipped, so scheduled runs do not re-spend.

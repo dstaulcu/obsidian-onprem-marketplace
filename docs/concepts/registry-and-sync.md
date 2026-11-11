@@ -101,4 +101,4 @@ plugin, so change the types first and update both sides.
 | Serve | Point any static server at `registry/`; clients need only read access |
 
 `registry.config.json` fields: `githubApiBase` (e.g. `https://github.corp/api/v3`), `tokenEnv` (name of the env
-var holding a read-only token), `outDir`, `maxVersions`, `publishPolicy` (`all` | `reviewed-pass` | `approved`; held-back versions sit in `plugins/<id>/staged.json`), `repos[]` (each with optional `pinVersions`, `maxVersions`), and an optional `review` block (`enabled`, `claudePath`, `model`, `maxBudgetUsd`, `maxReviewsPerRun`, `signingKeyPath`). See [Review, approval & signing](attestation.md).
+var holding a read-only token), `outDir`, `maxVersions`, `publishPolicy` (`all` | `reviewed-pass` | `approved`; held-back versions sit in `plugins/<id>/staged.json`), `repos[]` (each with optional `pinVersions`, `maxVersions`), and an optional `review` block (`enabled`, `claudePath`, `model`, `maxBudgetUsd`, `maxReviewsPerRun`, `signingKeyPath`, `rubricDir`). See [Review, approval & signing](attestation.md).

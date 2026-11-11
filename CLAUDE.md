@@ -21,6 +21,7 @@ npm workspaces (`packages/*`). Run from the repo root:
 - Run sync: `node packages/sync/dist/cli.js [registry.config.json]` (needs the env var named by `tokenEnv`; exits 1 if any errors)
 - Install plugin into a vault: `node scripts/bootstrap-vault.mjs <vaultPath> <registryUrl> [publicKeyFile] [off|warn|require-signed]`
 - Signing/review (see `docs/concepts/attestation.md`): `node packages/sync/dist/cli.js keygen keys`, `... review <id@version | --all>` (needs `ANTHROPIC_API_KEY`), `... approve <id@version> --key keys/signing-key.pem`
+- Rubric: checks live in `rubric/rules.json` and `rubric/review-prompt.md` (not in code); `node packages/sync/dist/cli.js rubric --write docs/concepts/rubric.md` validates them, runs each rule's examples, and regenerates the readable doc. Rubric version = content hash, so any rule change makes earlier reviews stale.
 - Rate limits: set the env var named by `tokenEnv` (e.g. `$env:GITHUB_TOKEN = (gh auth token)`); `maxVersions` caps mirrored history
 
 Each package's `build` runs `tsc -p .` (type-check only; `noEmit` in `tsconfig.base.json`) and then bundles with esbuild (sync → `dist/cli.js`, plugin → `packages/plugin/main.js`, CJS, `obsidian`/`electron` external). `dist/`, `registry/` and `packages/plugin/main.js` are gitignored build outputs.

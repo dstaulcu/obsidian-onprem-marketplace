@@ -4,6 +4,7 @@ import { makeFetcher, syncRegistry, type Config } from "./sync";
 import { approveVersion, generateKeys } from "./signing";
 import { claudeReviewer, reviewVersion } from "./review";
 import { promoteStaged, type PublishPolicy } from "./catalog";
+import { loadRubric, renderRubricDoc, testRule } from "./rubric";
 import { rebuildIndex } from "./sync";
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -30,6 +31,15 @@ if (cmd === "keygen") {
   const a = await approveVersion(registry, id, version, await readFile(keyPath, "utf8"), by, flag("override"));
   console.log(`approved ${a.id}@${a.version} by ${a.approvedBy} (review: ${a.reviewVerdict}${a.override ? `, override: ${a.override}` : ""})`);
   await publishHeld(registry, (flag("policy") as PublishPolicy | undefined) ?? "all");
+} else if (cmd === "rubric") {
+  // om-sync rubric [--dir rubric] [--write docs/concepts/rubric.md]   -> validates the rubric, runs every rule's examples
+  const flag = (n: string, d?: string) => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : d; };
+  const rb = await loadRubric(flag("dir", "rubric")!);
+  const fails = rb.rules.flatMap(testRule);
+  if (fails.length) { fails.forEach((f) => console.error("  x " + f)); process.exit(1); }
+  console.log(`rubric ${rb.version}: ${rb.rules.length} checks, all examples pass`);
+  const out = flag("write");
+  if (out) { await writeFile(out, renderRubricDoc(rb)); console.log(`wrote ${out}`); }
 } else if (cmd === "review") {
   // om-sync review <id@version | --all> [--config registry.config.json]
   const flag = (n: string, d?: string) => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : d; };
@@ -75,13 +85,15 @@ async function allVersions(outDir: string) {
 async function runReviews(cfg: Config, targets: { id: string; version: string }[]) {
   const rc = cfg.review!;
   if (!process.env.ANTHROPIC_API_KEY) { console.error("review: ANTHROPIC_API_KEY is not set; skipping reviews"); return; }
+  const rubric = await loadRubric(rc.rubricDir ?? "rubric");
+  console.log(`review: rubric ${rubric.version} (${rubric.rules.length} checks)`);
   const reviewer = claudeReviewer({ claudePath: rc.claudePath, model: rc.model, maxBudgetUsd: rc.maxBudgetUsd });
   const privatePem = rc.signingKeyPath ? await readFile(rc.signingKeyPath, "utf8") : undefined;
   let started = 0;
   for (const t of targets) {
     if (rc.maxReviewsPerRun && started >= rc.maxReviewsPerRun) { console.log(`review: reached maxReviewsPerRun (${rc.maxReviewsPerRun}); rest next run`); break; }
     try {
-      const o = await reviewVersion(cfg.outDir, t.id, t.version, reviewer, { privatePem, model: rc.model });
+      const o = await reviewVersion(cfg.outDir, t.id, t.version, reviewer, { privatePem, model: rc.model, rubric });
       if (o.status === "reviewed") started++;
       console.log(`  review ${o.status} ${t.id}@${t.version}: ${o.verdict}`);
     } catch (e) { console.error(`  review failed ${t.id}@${t.version}: ${(e as Error).message}`); }

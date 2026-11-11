@@ -8,6 +8,7 @@ Obsidian's built-in plugin browser cannot be pointed at a custom registry, so th
 - [Registry & sync](concepts/registry-and-sync.md) - admins
 - [Install & update lifecycle](concepts/install-lifecycle.md) - users
 - [Review, approval & signing](concepts/attestation.md) - admins and security
+- [The review rubric](concepts/rubric.md) - what is checked, and how to contribute a check (`rubric/README.md`)
 - [Security & trust model](concepts/security.md) - security stakeholders
 - [Developer guide](concepts/developer-guide.md) - contributors
 

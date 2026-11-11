@@ -6,7 +6,11 @@ import { createHash } from "node:crypto";
 import { verifySignature, type ReviewRecord } from "@om/shared";
 import { generateKeys } from "../src/signing";
 import { combineVerdict, parseModelOutput, reviewVersion, type Reviewer } from "../src/review";
-import { scanSource } from "../src/staticchecks";
+import { scanSource as scan } from "../src/staticchecks";
+import { loadRubric } from "../src/rubric";
+
+const rubric = await loadRubric("rubric");
+const scanSource = (s: string) => scan(s, rubric.rules);
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
@@ -28,7 +32,7 @@ describe("static checks", () => {
   it("flags eval, child_process and dynamic require, and lists hosts", () => {
     const r = scanSource('const x = eval("1"); require("child_process"); require(name); fetch("https://evil.example.com/a")');
     const rules = r.findings.map((f) => f.rule);
-    expect(rules).toEqual(expect.arrayContaining(["eval", "child_process", "dynamic require/import", "network call"]));
+    expect(rules).toEqual(expect.arrayContaining(["eval", "child-process", "dynamic-load", "network"]));
     expect(r.hosts).toEqual(["evil.example.com"]);
   });
   it("does not flag plain code", () => {
@@ -54,7 +58,7 @@ describe("reviewVersion", () => {
   it("writes a signed record and a report bound by hash", async () => {
     const { out, vdir } = await fixture("module.exports = 1");
     const k = generateKeys();
-    const o = await reviewVersion(out, "demo", "1.0.0", reviewerOf(passModel), { privatePem: k.privatePem, model: "test-model" });
+    const o = await reviewVersion(out, "demo", "1.0.0", reviewerOf(passModel), { privatePem: k.privatePem, model: "test-model", rubric });
     expect(o).toMatchObject({ status: "reviewed", verdict: "pass" });
     const bytes = await readFile(join(vdir, "review.json"));
     expect(await verifySignature(bytes, await readFile(join(vdir, "review.json.sig"), "utf8"), k.publicSpkiB64)).toBe(true);
@@ -66,18 +70,18 @@ describe("reviewVersion", () => {
   it("does not re-review an unchanged version (no repeat spend)", async () => {
     const { out } = await fixture("module.exports = 1");
     const calls = { n: 0 };
-    await reviewVersion(out, "demo", "1.0.0", reviewerOf(passModel, calls), { model: "test-model" });
-    const again = await reviewVersion(out, "demo", "1.0.0", reviewerOf(passModel, calls), { model: "test-model" });
+    await reviewVersion(out, "demo", "1.0.0", reviewerOf(passModel, calls), { model: "test-model", rubric });
+    const again = await reviewVersion(out, "demo", "1.0.0", reviewerOf(passModel, calls), { model: "test-model", rubric });
     expect(again.status).toBe("skipped");
     expect(calls.n).toBe(1);
   });
 
   it("records malformed model output as error and escapes markup in the report", async () => {
     const { out, vdir } = await fixture("module.exports = 1");
-    const o = await reviewVersion(out, "demo", "1.0.0", reviewerOf("<script>alert(1)</script>"));
+    const o = await reviewVersion(out, "demo", "1.0.0", reviewerOf("<script>alert(1)</script>"), { rubric });
     expect(o.verdict).toBe("error");
     const bad = { verdict: "findings", summary: "<img src=x onerror=alert(1)>", findings: [] };
-    await reviewVersion(out, "demo", "1.0.0", reviewerOf(bad), { rubricVersion: "2" });
+    await reviewVersion(out, "demo", "1.0.0", reviewerOf(bad), { rubric: { ...rubric, version: "v2" } });
     const md = await readFile(join(vdir, "review.html"), "utf8");
     expect(md).not.toContain("<img");
     expect(md).toContain("&lt;img");
@@ -87,10 +91,10 @@ describe("reviewVersion", () => {
     let seen = "";
     const spy: Reviewer = async (p) => { seen = p; return { output: passModel, model: "m" }; };
     const small = await fixture("const marker = 12345;");
-    await reviewVersion(small.out, "demo", "1.0.0", spy, { rubricVersion: "t" });
+    await reviewVersion(small.out, "demo", "1.0.0", spy, { rubric: { ...rubric, version: "t" } });
     expect(seen).toContain("const marker = 12345;");
     const big = await fixture("x".repeat(70_000));
-    await reviewVersion(big.out, "demo", "1.0.0", spy, { rubricVersion: "t" });
+    await reviewVersion(big.out, "demo", "1.0.0", spy, { rubric: { ...rubric, version: "t" } });
     expect(seen).not.toContain("x".repeat(1000));
     const html = await readFile(join(big.vdir, "review.html"), "utf8");
     expect(html).toContain("PARTIAL");
@@ -99,6 +103,6 @@ describe("reviewVersion", () => {
   it("refuses to review files that do not match versions.json", async () => {
     const { out, vdir } = await fixture("module.exports = 1");
     await writeFile(join(vdir, "main.js"), "tampered");
-    await expect(reviewVersion(out, "demo", "1.0.0", reviewerOf(passModel))).rejects.toThrow(/does not match/);
+    await expect(reviewVersion(out, "demo", "1.0.0", reviewerOf(passModel), { rubric })).rejects.toThrow(/does not match/);
   });
 });
