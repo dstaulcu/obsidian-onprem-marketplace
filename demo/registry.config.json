@@ -4,7 +4,6 @@
   "review": {
     "enabled": false,
     "provider": "claude-code",
-    "claudePath": "C:\\Users\\david\\.local\\bin\\claude.exe",
     "model": "claude-sonnet-5-5",
     "maxBudgetUsd": 0.5,
     "signingKeyPath": "demo/keys/signing-key.pem"

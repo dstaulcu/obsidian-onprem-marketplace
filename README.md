@@ -77,5 +77,7 @@ decision, not a guarantee of safety**; large minified plugins get only a partial
 | [Security & trust model](docs/concepts/security.md) | Boundaries, protections, gaps (security reviewers) |
 | [Developer guide](docs/concepts/developer-guide.md) | Code layout and common changes |
 
+Licensed under the [MIT License](LICENSE).
+
 Layout: `packages/shared` (types and signature verification), `packages/sync` (CLI: sync, review, approve, keygen),
 `packages/plugin` (the Obsidian plugin), `rubric/` (the checks), `docs/`, `demo/`.

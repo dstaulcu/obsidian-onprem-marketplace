@@ -14,7 +14,10 @@ Write-Host "Demo preflight" -ForegroundColor Cyan
 Check "node 20+"                       ((node -p "process.versions.node.split('.')[0]") -ge 20) "install Node 20 or newer"
 Check "sync CLI built"                 (Test-Path "packages\sync\dist\cli.js") "run: npm run build"
 Check "marketplace plugin built"       (Test-Path "packages\plugin\main.js") "run: npm run build"
-Check "Claude Code present"            (Test-Path $cfg.review.claudePath) ("fix review.claudePath in demo\registry.config.json (now: " + $cfg.review.claudePath + ")")
+$claude = $cfg.review.claudePath
+if (-not $claude) { $claude = $env:CLAUDE_PATH }
+if (-not $claude) { $c = Get-Command claude -ErrorAction SilentlyContinue; if ($c) { $claude = $c.Source } }
+Check "Claude Code found"              ($claude -and (Test-Path $claude)) "set `$env:CLAUDE_PATH = 'C:\path\to\claude.exe' (or put claude on PATH)"
 Check "ANTHROPIC_API_KEY set"          ([bool]$env:ANTHROPIC_API_KEY) "set it in THIS window before recording, then run Clear-Host"
 Check "port 8080 free (registry)"      (PortFree 8080) "stop whatever is using 8080, or run .\demo\02-start-servers.ps1 only once"
 Check "port 9090 free (fake GitHub)"   (PortFree 9090) "stop whatever is using 9090"

@@ -5,7 +5,6 @@
   "maxVersions": 5,
   "review": {
     "enabled": false,
-    "claudePath": "C:\\Users\\david\\.local\\bin\\claude.exe",
     "model": "claude-sonnet-5-5",
     "maxBudgetUsd": 0.5,
     "maxReviewsPerRun": 5,
@@ -14,10 +13,6 @@
   "repos": [
     { "repo": "dstaulcu/test-plugin" },
     { "repo": "dstaulcu/obsidian-tag-registry-client" },
-    { "repo": "dstaulcu/obsidian-scheduled-agents"},
-    { "repo": "tu2-atmanand/Task-Board" },
-    { "repo": "glowingjade/obsidian-smart-composer" },
-    { "repo": "pjeby/tag-wrangler" },
-    { "repo": "vinzent03/obsidian-git", "maxVersions": 4 }
+    { "repo": "dstaulcu/obsidian-scheduled-agents" }
   ]
 }

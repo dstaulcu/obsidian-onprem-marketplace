@@ -81,7 +81,7 @@ describe("makeReviewer config validation", () => {
     expect(() => makeReviewer({ provider: "openai-compatible" })).toThrow(/baseUrl/);
     expect(() => makeReviewer({ provider: "openai-compatible", openai: { baseUrl: "http://x" } })).toThrow(/model is required/);
     expect(() => makeReviewer({ provider: "wrapper" })).toThrow(/command/);
-    expect(() => makeReviewer({})).toThrow(/claudePath/);
+    expect(() => makeReviewer({})).not.toThrow(); // claude-code falls back to CLAUDE_PATH or PATH
     expect(() => makeReviewer({ provider: "nope" as never })).toThrow(/unknown review provider/);
   });
 });

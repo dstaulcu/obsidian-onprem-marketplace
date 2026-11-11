@@ -124,8 +124,8 @@ export function makeReviewer(c: ProviderConfig): Reviewer {
   const model = c.model ?? "";
   switch (c.provider ?? "claude-code") {
     case "claude-code":
-      if (!c.claudePath) throw new Error("review.claudePath is required for provider claude-code");
-      return claudeReviewer({ claudePath: c.claudePath, model: c.model, maxBudgetUsd: c.maxBudgetUsd });
+      // Config value, else the CLAUDE_PATH env var, else "claude" resolved from PATH (must be a real executable, not a .cmd shim).
+      return claudeReviewer({ claudePath: c.claudePath ?? process.env.CLAUDE_PATH ?? "claude", model: c.model, maxBudgetUsd: c.maxBudgetUsd });
     case "openai-compatible":
       if (!c.openai?.baseUrl) throw new Error("review.openai.baseUrl is required for provider openai-compatible");
       if (!model) throw new Error("review.model is required for provider openai-compatible");

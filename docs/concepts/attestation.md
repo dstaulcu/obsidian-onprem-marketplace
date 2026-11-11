@@ -82,7 +82,7 @@ record and report.
 
 | `provider` | Use when | Key settings |
 |---|---|---|
-| `claude-code` (default) | Claude Code can reach your model (Anthropic API, or an Anthropic-compatible gateway via `ANTHROPIC_BASE_URL`) | `claudePath`, `model`, `maxBudgetUsd`; needs `ANTHROPIC_API_KEY` |
+| `claude-code` (default) | Claude Code can reach your model (Anthropic API, or an Anthropic-compatible gateway via `ANTHROPIC_BASE_URL`) | `model`, `maxBudgetUsd`, optional `claudePath` (else the `CLAUDE_PATH` env var, else `claude` on PATH); needs `ANTHROPIC_API_KEY` |
 | `openai-compatible` | An OpenAI-style endpoint (`/chat/completions`) | `model`, `openai.baseUrl`, `openai.apiKeyEnv` (env var *name*), `openai.jsonMode` |
 | `wrapper` | An organization-standard harness wrapper that owns credentials and base URLs | `wrapper.command`, `wrapper.args` template, `wrapper.provider`, `wrapper.harness`, `wrapper.promptVia` |
 
