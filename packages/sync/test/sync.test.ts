@@ -43,3 +43,21 @@ describe("sync", () => {
     expect(r.errors[0]).toMatch(/!=/);
   });
 });
+
+import { isSafeVersion, isValidPluginId, validateManifest } from "@om/shared";
+
+describe("shared path-safety validation", () => {
+  it("rejects traversal-capable ids", () => {
+    for (const id of ["../x", "a/b", "a\b", "..", ".hidden", "", "A"]) expect(isValidPluginId(id)).toBe(false);
+    expect(isValidPluginId("my-plugin_2")).toBe(true);
+  });
+  it("rejects traversal-capable versions", () => {
+    for (const v of ["1.0.0/../../x", "1.0.0-a/b", "../1.0.0", "1.0"]) expect(isSafeVersion(v)).toBe(false);
+    expect(isSafeVersion("1.2.3")).toBe(true);
+    expect(isSafeVersion("1.2.3-beta.1")).toBe(true);
+  });
+  it("validateManifest flags them", () => {
+    const m = { id: "../x", name: "n", version: "1.0.0/..", minAppVersion: "1.0.0", description: "d", author: "a" };
+    expect(validateManifest(m)).toEqual(expect.arrayContaining(["invalid id", "version not x.y.z"]));
+  });
+});

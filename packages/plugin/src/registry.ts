@@ -1,5 +1,5 @@
 import { requestUrl } from "obsidian";
-import type { IndexEntry, VersionEntry } from "@om/shared";
+import { isSafeVersion, isValidPluginId, type IndexEntry, type VersionEntry } from "@om/shared";
 
 const join = (base: string, path: string) => base.replace(/\/+$/, "") + "/" + path;
 
@@ -8,9 +8,16 @@ async function getJson<T>(url: string): Promise<T> {
   return r.json as T;
 }
 
-export const fetchIndex = (base: string) => getJson<IndexEntry[]>(join(base, "index.json"));
-export const fetchVersions = (base: string, id: string) =>
-  getJson<VersionEntry[]>(join(base, `plugins/${id}/versions.json`));
+/** The registry is untrusted input: drop entries whose id/version could escape the plugins directory. */
+export async function fetchIndex(base: string): Promise<IndexEntry[]> {
+  const all = await getJson<IndexEntry[]>(join(base, "index.json"));
+  return all.filter((e) => isValidPluginId(e?.id) && isSafeVersion(e.latestVersion));
+}
+export async function fetchVersions(base: string, id: string): Promise<VersionEntry[]> {
+  if (!isValidPluginId(id)) throw new Error(`Invalid plugin id: ${id}`);
+  const all = await getJson<VersionEntry[]>(join(base, `plugins/${id}/versions.json`));
+  return all.filter((v) => isSafeVersion(v?.version));
+}
 
 export async function fetchFile(base: string, id: string, version: string, name: string): Promise<ArrayBuffer> {
   const r = await requestUrl({ url: join(base, `plugins/${id}/${version}/${name}`) });

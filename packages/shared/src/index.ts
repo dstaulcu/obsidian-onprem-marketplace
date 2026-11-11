@@ -43,12 +43,20 @@ export function compareSemver(a: string, b: string): number {
   return 0;
 }
 
+/** Plugin ids become directory names (vault and registry), so they must be path-safe. */
+export const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-_]*$/;
+export const isValidPluginId = (id: unknown): id is string => typeof id === "string" && PLUGIN_ID_RE.test(id);
+
+/** Versions become path segments in registry URLs; allow only x.y.z with a safe optional suffix. */
+export const isSafeVersion = (v: unknown): v is string =>
+  typeof v === "string" && /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(v);
+
 export function validateManifest(m: unknown): string[] {
   const errs: string[] = [];
   const o = (m ?? {}) as Record<string, unknown>;
   for (const k of ["id", "name", "version", "minAppVersion", "description", "author"])
     if (typeof o[k] !== "string" || !(o[k] as string).trim()) errs.push(`missing ${k}`);
-  if (typeof o.id === "string" && !/^[a-z0-9][a-z0-9-_]*$/.test(o.id)) errs.push("invalid id");
-  if (typeof o.version === "string" && !parseSemver(o.version)) errs.push("version not x.y.z");
+  if (typeof o.id === "string" && !isValidPluginId(o.id)) errs.push("invalid id");
+  if (typeof o.version === "string" && !isSafeVersion(o.version)) errs.push("version not x.y.z");
   return errs;
 }

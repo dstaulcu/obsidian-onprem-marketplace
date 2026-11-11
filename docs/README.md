@@ -3,6 +3,13 @@
 Obsidian's built-in plugin browser cannot be pointed at a custom registry, so this project provides an
 **On-Prem Marketplace plugin** plus a **static registry** fed from releases on your on-prem GitHub.
 
+## Concept guides
+- [Overview](concepts/overview.md) - start here
+- [Registry & sync](concepts/registry-and-sync.md) - admins
+- [Install & update lifecycle](concepts/install-lifecycle.md) - users
+- [Security & trust model](concepts/security.md) - security stakeholders
+- [Developer guide](concepts/developer-guide.md) - contributors
+
 ## Admin flow
 1. Edit `registry.config.json`: set `githubApiBase` (e.g. `https://github.corp/api/v3`), `tokenEnv`, and the nominated `repos`.
 2. Each plugin repo publishes a GitHub release whose tag equals the `manifest.json` version, with `main.js`,

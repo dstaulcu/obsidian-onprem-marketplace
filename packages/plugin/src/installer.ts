@@ -1,5 +1,5 @@
 import type { App, PluginManifest } from "obsidian";
-import { compareSemver, type IndexEntry } from "@om/shared";
+import { compareSemver, isValidPluginId, type IndexEntry } from "@om/shared";
 import { fetchFile, fetchVersions, sha256Hex } from "./registry";
 
 /**
@@ -26,6 +26,7 @@ export function isCompatible(entry: IndexEntry, appVersion: string, isMobile: bo
 }
 
 export async function install(app: App, base: string, id: string, version?: string): Promise<string> {
+  if (!isValidPluginId(id)) throw new Error(`Invalid plugin id: ${id}`);
   const versions = await fetchVersions(base, id);
   const v = version ? versions.find((x) => x.version === version) : versions[0];
   if (!v) throw new Error(`No such version for ${id}`);
@@ -53,6 +54,7 @@ export async function install(app: App, base: string, id: string, version?: stri
 }
 
 export async function uninstall(app: App, id: string): Promise<void> {
+  if (!isValidPluginId(id)) throw new Error(`Invalid plugin id: ${id}`);
   await mgr(app).disablePluginAndSave(id);
   await app.vault.adapter.rmdir(`${app.vault.configDir}/plugins/${id}`, true);
   await mgr(app).loadManifests();
