@@ -16,7 +16,7 @@ flowchart TD
     PL -. "reads registry format" .-> FMT
 ```
 
-`@om/shared` is consumed as TypeScript source (`main: src/index.ts`), so there is no separate compile step to
+`@om/shared` also holds `attest.ts` (signature verification, `checkApproval`, `selectVersion`) so the plugin and the tests share one implementation. `@om/shared` is consumed as TypeScript source (`main: src/index.ts`), so there is no separate compile step to
 rely on; however the root `npm run build` builds it first anyway.
 
 ## Plugin internals
@@ -34,6 +34,9 @@ flowchart LR
 
 ## Sync internals
 
+- `signing.ts` - key generation, ECDSA signing, `approveVersion`.
+- `review.ts` / `staticchecks.ts` - review pipeline: deterministic checks, injectable `Reviewer` (tests mock it), `claudeReviewer` (spawns Claude Code), report rendering.
+- `cli.ts` - subcommands `keygen`, `review`, `approve`; default is sync.
 - `sync.ts` exports `syncRegistry(cfg, fetcher)`, `rebuildIndex()`, `makeFetcher(token)`.
 - The `Fetcher` type is injectable; tests supply a mock returning `Response` objects, so no network or GitHub is
   needed. Follow the pattern in `packages/sync/test/sync.test.ts` (temp `outDir` via `mkdtemp`).

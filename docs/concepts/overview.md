@@ -62,5 +62,6 @@ Key properties:
 
 - Operating it: [Registry & sync](registry-and-sync.md)
 - Extending it: [Developer guide](developer-guide.md)
+- Reviewing and signing plugins: [Review, approval & signing](attestation.md)
 - Assessing it: [Security & trust model](security.md)
 - Client behavior: [Install & update lifecycle](install-lifecycle.md)

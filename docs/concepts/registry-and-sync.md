@@ -56,6 +56,8 @@ registry/
         manifest.json
         main.js
         styles.css                 # optional
+        review.json, review.json.sig, review.html   # optional, from `om-sync review`
+        approval.json, approval.json.sig            # optional, from `om-sync approve`
 ```
 
 ```mermaid
@@ -99,4 +101,4 @@ plugin, so change the types first and update both sides.
 | Serve | Point any static server at `registry/`; clients need only read access |
 
 `registry.config.json` fields: `githubApiBase` (e.g. `https://github.corp/api/v3`), `tokenEnv` (name of the env
-var holding a read-only token), `outDir`, `repos[]`.
+var holding a read-only token), `outDir`, `maxVersions`, `repos[]` (each with optional `pinVersions`, `maxVersions`), and an optional `review` block (`enabled`, `claudePath`, `model`, `maxBudgetUsd`, `maxReviewsPerRun`, `signingKeyPath`). See [Review, approval & signing](attestation.md).

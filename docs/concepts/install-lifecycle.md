@@ -4,7 +4,7 @@ Audience: users and developers.
 
 ## Bootstrapping a vault
 
-`node scripts/bootstrap-vault.mjs <vaultPath> <registryUrl>` copies `main.js` + `manifest.json` into
+`node scripts/bootstrap-vault.mjs <vaultPath> <registryUrl> [publicKeyFile] [mode]` copies `main.js` + `manifest.json` into
 `.obsidian/plugins/onprem-marketplace/`, writes `data.json` with the registry URL, and adds the plugin id to
 `community-plugins.json`. The user then turns off Restricted mode and reloads Obsidian.
 
@@ -54,6 +54,13 @@ stateDiagram-v2
 ```
 
 The marketplace itself cannot be uninstalled from its own UI.
+
+## Trust modes
+
+The plugin setting **Trust mode** (`off`, `warn`, `require-signed`) and the pinned **public key** decide which version
+is installed. In `require-signed` mode only versions with a valid signed approval are eligible, and "Update all"
+moves to the newest approved version. The modal shows an approved / not approved badge and a link to the review
+report. Details: [Review, approval & signing](attestation.md).
 
 ## Compatibility gating
 
