@@ -104,3 +104,59 @@ describe("prompt size limits", () => {
     expect(prompt.length).toBeLessThan(26_000);
   });
 });
+
+describe("tool-enabled harness (stageFiles)", () => {
+  async function plugin(code: string) {
+    const out = await mkdtemp(join(tmpdir(), "reg-"));
+    const vdir = join(out, "plugins", "demo", "1.0.0");
+    await mkdir(vdir, { recursive: true });
+    const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+    await writeFile(join(vdir, "main.js"), code);
+    await writeFile(join(vdir, "manifest.json"), "{}");
+    await writeFile(join(out, "plugins", "demo", "versions.json"), JSON.stringify([
+      { version: "1.0.0", minAppVersion: "1", published: "x", hasStyles: false, sha256: { main: sha(code), manifest: sha("{}"), styles: "" } }]));
+    return { out, vdir };
+  }
+  const harness = (fn: (stageDir: string, prompt: string) => Promise<unknown>): Reviewer =>
+    Object.assign(async (p: string, ctx?: { stageDir?: string }) => ({ output: await fn(ctx!.stageDir!, p), model: "h/m" }), { stageFiles: true });
+
+  it("stages only the plugin files, names them in the prompt instead of embedding source, and cleans up", async () => {
+    const { out, vdir } = await plugin("const marker = 424242;");
+    let seen = { files: [] as string[], prompt: "", dir: "" };
+    const { readdir } = await import("node:fs/promises");
+    await reviewVersion(out, "demo", "1.0.0", harness(async (dir, p) => { seen = { files: (await readdir(dir)).sort(), prompt: p, dir }; return good; }), { rubric });
+    expect(seen.files).toEqual(["main.js", "manifest.json"]);
+    expect(seen.prompt).toContain("CURRENT directory");
+    expect(seen.prompt).toContain("Read ONLY those files");
+    expect(seen.prompt).not.toContain("424242");
+    await expect(readdir(seen.dir)).rejects.toThrow();                      // staging dir removed
+    const html = await (await import("node:fs/promises")).readFile(join(vdir, "review.html"), "utf8");
+    expect(html).toContain("DELEGATED");
+  });
+
+  it("discards the result if the harness modified the staged files", async () => {
+    const { out } = await plugin("module.exports = 1");
+    const o = await reviewVersion(out, "demo", "1.0.0", harness(async (dir) => { await writeFile(join(dir, "main.js"), "changed"); return good; }), { rubric });
+    expect(o.verdict).toBe("error");
+  });
+
+  it("discards output containing secret-like content (injection into a tool-enabled harness)", async () => {
+    const { out } = await plugin("module.exports = 1");
+    for (const leak of ["-----BEGIN PRIVATE KEY-----\nMIIE", "sk-ant-api03-abcdefghijklmnop", "ghp_abcdefghijklmnopqrstuvwxyz0123"]) {
+      const o = await reviewVersion(out, "demo", "1.0.0", harness(async () => ({ ...good, summary: `found ${leak}` })), { rubric: { ...rubric, version: "x" + leak.length } });
+      expect(o.verdict).toBe("error");
+    }
+  });
+
+  it("works through the wrapper: runs in the staging directory and exposes {stageDir}", async () => {
+    const script = `const fs=require("fs");const here=process.cwd();process.stdout.write(JSON.stringify({verdict:"pass",summary:fs.readdirSync(here).sort().join(",")+"|"+(process.argv.at(-1)===here),findings:[]}))`;
+    const r = wrapperReviewer({ command: process.execPath, args: ["-e", script, "--", "{stageDir}"], stageFiles: true }, "m");
+    const { out, vdir } = await plugin("module.exports = 1");
+    await reviewVersion(out, "demo", "1.0.0", r, { rubric });
+    const rec = JSON.parse(await (await import("node:fs/promises")).readFile(join(vdir, "review.json"), "utf8"));
+    expect(rec.review.verdict).toBe("pass");
+    expect(rec.review.scope[0]).toContain("harness");
+    const html = await (await import("node:fs/promises")).readFile(join(vdir, "review.html"), "utf8");
+    expect(html).toContain("main.js,manifest.json|true");
+  });
+});

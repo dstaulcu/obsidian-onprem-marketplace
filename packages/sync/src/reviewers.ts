@@ -21,12 +21,19 @@ export interface OpenAiConfig {
 }
 export interface WrapperConfig {
   command: string;
-  /** Argument template. Placeholders: {provider} {harness} {model} {prompt} {promptFile}. */
+  /** Argument template. Placeholders: {provider} {harness} {model} {prompt} {promptFile} {stageDir}. */
   args: string[];
   provider?: string;
   harness?: string;
   /** How the prompt reaches the wrapper: as an argument (default), on stdin, or as a file path. */
   promptVia?: "arg" | "stdin" | "file";
+  /**
+   * The harness has file tools and reads the plugin files itself. The plugin files are copied into a fresh empty
+   * directory which becomes the wrapper's working directory ({stageDir} is its absolute path). The prompt then
+   * names files instead of embedding source. Requires a harness whose file access is read-only and confined to
+   * its working directory; this program cannot enforce that for you.
+   */
+  stageFiles?: boolean;
   timeoutMs?: number;
 }
 export interface ProviderConfig {
@@ -50,11 +57,11 @@ export function extractJson(text: string): unknown {
   return t; // unparseable: left as a string so validation rejects it
 }
 
-export function buildWrapperArgs(w: WrapperConfig, model: string, prompt: string, promptFile?: string): string[] {
+export function buildWrapperArgs(w: WrapperConfig, model: string, prompt: string, promptFile?: string, stageDir?: string): string[] {
   const vars: Record<string, string> = {
-    provider: w.provider ?? "", harness: w.harness ?? "", model, prompt: (w.promptVia ?? "arg") === "arg" ? prompt : "", promptFile: promptFile ?? "",
+    provider: w.provider ?? "", harness: w.harness ?? "", model, prompt: (w.promptVia ?? "arg") === "arg" ? prompt : "", promptFile: promptFile ?? "", stageDir: stageDir ?? "",
   };
-  return w.args.map((a) => a.replace(/\{(provider|harness|model|prompt|promptFile)\}/g, (_m, k: string) => vars[k]));
+  return w.args.map((a) => a.replace(/\{(provider|harness|model|prompt|promptFile|stageDir)\}/g, (_m, k: string) => vars[k]));
 }
 
 function run(command: string, args: string[], stdin: string | null, cwd: string, timeoutMs: number): Promise<string> {
@@ -71,18 +78,20 @@ function run(command: string, args: string[], stdin: string | null, cwd: string,
 
 export function wrapperReviewer(w: WrapperConfig, model: string): Reviewer {
   // Windows allows ~32K characters on a command line; leave room for the other arguments.
-  const r: Reviewer = async (prompt) => {
-    const cwd = await mkdtemp(join(tmpdir(), "om-review-"));
+  const r: Reviewer = async (prompt, ctx) => {
+    const own = ctx?.stageDir ? null : await mkdtemp(join(tmpdir(), "om-review-"));
+    const cwd = (ctx?.stageDir ?? own)!;
     try {
       const full = withSchemaInstruction(prompt);
       const via = w.promptVia ?? "arg";
       let file: string | undefined;
       if (via === "file") { file = join(cwd, "prompt.txt"); await writeFile(file, full); }
-      const out = await run(w.command, buildWrapperArgs(w, model, via === "arg" ? full : "", file), via === "stdin" ? full : null, cwd, w.timeoutMs ?? 300_000);
+      const out = await run(w.command, buildWrapperArgs(w, model, via === "arg" ? full : "", file, ctx?.stageDir), via === "stdin" ? full : null, cwd, w.timeoutMs ?? 300_000);
       return { output: extractJson(out), model: [w.provider, w.harness, model].filter(Boolean).join("/") };
-    } finally { await rm(cwd, { recursive: true, force: true }); }
+    } finally { if (own) await rm(own, { recursive: true, force: true }); }
   };
   if ((w.promptVia ?? "arg") === "arg") r.maxPromptChars = 26_000;
+  if (w.stageFiles) r.stageFiles = true;
   return r;
 }
 

@@ -22,6 +22,7 @@ npm workspaces (`packages/*`). Run from the repo root:
 - Install plugin into a vault: `node scripts/bootstrap-vault.mjs <vaultPath> <registryUrl> [publicKeyFile] [off|warn|require-signed]`
 - Signing/review (see `docs/concepts/attestation.md`): `node packages/sync/dist/cli.js keygen keys`, `... review <id@version | --all>` (needs `ANTHROPIC_API_KEY`), `... approve <id@version> --key keys/signing-key.pem`
 - Review model: `review.provider` = `claude-code` | `openai-compatible` | `wrapper` (`packages/sync/src/reviewers.ts`); all return untrusted output validated by `review.ts`. Wrapper args are a template (`{provider} {harness} {model} {prompt} {promptFile}`), spawned without a shell.
+- Tool-enabled harness: `wrapper.stageFiles` stages plugin files into a temp dir used as the wrapper cwd, re-hashes them after the run, and discards secret-like output (`SECRET_RE` in `review.ts`). Never weaken these checks; the harness sandbox itself is the owner's responsibility.
 - Rubric: checks live in `rubric/rules.json` and `rubric/review-prompt.md` (not in code); `node packages/sync/dist/cli.js rubric --write docs/concepts/rubric.md` validates them, runs each rule's examples, and regenerates the readable doc. Rubric version = content hash, so any rule change makes earlier reviews stale.
 - Rate limits: set the env var named by `tokenEnv` (e.g. `$env:GITHUB_TOKEN = (gh auth token)`); `maxVersions` caps mirrored history
 

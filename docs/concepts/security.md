@@ -82,6 +82,10 @@ Reviews are produced by Claude Code and by deterministic checks. Treat them as *
   report says so. A "pass" means nothing concerning was found in the evidence shown.
 - Reviews send plugin code to a model API. For the work version this must be an approved model or endpoint; each
   record names the model used, which is also the audit trail.
+- A tool-enabled review harness (wrapper `stageFiles`) is a larger attack surface than a text-only call. Its file
+  access must be read-only and confined to the staging directory; the review stage stages only plugin files, detects
+  modification, and discards secret-like output, but cannot enforce the harness sandbox itself. See
+  [Review, approval & signing](attestation.md).
 - The API key is read only from the environment of the sync host and is never written to config or the registry.
 
 ## Other review notes
