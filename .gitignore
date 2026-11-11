@@ -3,3 +3,8 @@ dist/
 registry/
 packages/plugin/main.js
 *.log
+# signing keys and secrets: never commit
+*.pem
+*.key
+keys/
+signing-key*

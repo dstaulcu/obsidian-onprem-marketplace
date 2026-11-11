@@ -1,3 +1,5 @@
+export * from "./attest";
+
 export interface PluginManifest {
   id: string;
   name: string;
