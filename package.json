@@ -2,8 +2,10 @@
   "name": "obsidian-onprem-marketplace",
   "private": true,
   "license": "MIT",
-  "version": "0.1.0",
-  "workspaces": ["packages/*"],
+  "version": "0.1.1",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "build": "npm run build -w @om/shared && npm run build -w @om/sync && npm run build -w onprem-marketplace",
     "test": "vitest run"

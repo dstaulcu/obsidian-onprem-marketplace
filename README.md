@@ -54,7 +54,7 @@ node scripts/bootstrap-vault.mjs <vaultPath> http://127.0.0.1:8080 keys/public-k
 Then in Obsidian: Settings > Community plugins > turn off Restricted mode, reload, and use the store icon in the ribbon.
 
 Want to see it first? The [`demo/`](demo) folder runs the whole flow offline against a fake GitHub with a benign plugin and
-an inert, deliberately suspicious one.
+an inert, deliberately suspicious one. A recording of the client plugin lifecycle is in [`demo/README.md`](demo/README.md).
 
 ## Status
 

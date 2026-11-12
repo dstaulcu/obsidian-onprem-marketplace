@@ -1,8 +1,14 @@
 {
   "name": "@om/sync",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
-  "bin": { "om-sync": "dist/cli.js" },
-  "scripts": { "build": "tsc -p . && esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=dist/cli.js" },
-  "dependencies": { "@om/shared": "*" }
+  "bin": {
+    "om-sync": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p . && esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=dist/cli.js"
+  },
+  "dependencies": {
+    "@om/shared": "*"
+  }
 }
