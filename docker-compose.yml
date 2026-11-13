@@ -1,14 +1,33 @@
-# Registry + admin. The registry is static files served read-only to clients; the admin service is the only writer.
+# Registry + admin. The registry is static files served read-only to clients; the admin service is the only writer in
+# the container. The registry lives in a HOST folder (./registry-data) so `approve` can sign versions from your machine
+# with the private key, which never enters a container.
 # Before first start, see docs/admin.md: create ./config (admin.config.json, registry.config.json with outDir "/data",
 # public-key.txt, TLS certificates) and add an admin with:
 #   node packages/admin/dist/admin.cjs passwd <name> --users config/admin-users.json
 # (run on the host: /config is mounted read-only in the container)
+# On Linux hosts set OM_UID/OM_GID to your own ids (export OM_UID=$(id -u) OM_GID=$(id -g)) so the files the admin
+# writes into ./registry-data stay editable by you. Docker Desktop (Windows/macOS) does not need this.
 services:
+  # One-shot: make sure the admin's (unprivileged) user can write the data folders. Best effort: on Docker Desktop bind
+  # mounts are already writable and chown may be refused, which is fine.
+  init:
+    image: busybox:stable
+    user: "0"
+    command: ["sh", "-c", "chown ${OM_UID:-10001}:${OM_GID:-10001} /data /audit 2>/dev/null; chmod 755 /data /audit 2>/dev/null; exit 0"]
+    volumes:
+      - ./registry-data:/data
+      - audit:/audit
+    restart: "no"
+
   admin:
     build: .
+    user: "${OM_UID:-10001}:${OM_GID:-10001}"
+    depends_on:
+      init:
+        condition: service_completed_successfully
     ports: ["8443:8443"]
     volumes:
-      - registry:/data
+      - ./registry-data:/data
       - audit:/audit
       - logs:/logs:ro
       - ./config:/config:ro
@@ -27,7 +46,7 @@ services:
     image: nginx:stable-alpine
     ports: ["8080:80"]
     volumes:
-      - registry:/usr/share/nginx/html:ro
+      - ./registry-data:/usr/share/nginx/html:ro
       - ./deploy/nginx-om.conf:/etc/nginx/conf.d/default.conf:ro
       - logs:/var/log/om
     read_only: true
@@ -35,6 +54,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  registry:
   audit:
   logs:

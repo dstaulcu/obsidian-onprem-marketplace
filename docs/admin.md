@@ -1,9 +1,11 @@
 # Admin service
 
-> **Experimental.** The admin service, client-activity view and Splunk forwarding are covered by unit tests, and mTLS
-> login was exercised with throwaway certificates, but the **container setup (`Dockerfile`, `docker-compose.yml`, nginx
-> log format) has not been run yet**, nothing has been tried against a real Splunk, and real Obsidian/`om` user agents
-> have not been checked against the parser. Expect rough edges and do not expose it beyond a test network yet.
+> **Experimental.** The admin service, client-activity view and Splunk forwarding are covered by unit tests. The
+> container setup has been run once on Docker Desktop (build, mTLS login, sync, nginx log read, `stats.json`), but:
+> nothing has been tried against a real Splunk; real Obsidian and `om` user agents have not been checked against the
+> parser (only an Obsidian-style one I supplied); Docker Desktop shows every client as the bridge address
+> (`172.18.0.1`), so zones and distinct counts are not meaningful there; and the dashboard page has not been viewed in
+> a browser. Expect rough edges and do not expose it beyond a test network yet.
 
 A small web interface for the registry admin: see what is mirrored, staged, reviewed and approved, and trigger **sync**
 and **review**. It does not approve or sign anything: `approve` stays on the CLI, so the signing key never has to
@@ -44,7 +46,17 @@ TLS is mandatory; the service refuses to start without it unless `allowInsecureH
 3. **Passwords (optional).** On the host: `node packages/admin/dist/admin.cjs passwd alice --users config/admin-users.json`
    (prompted, min 12 characters; or `OM_ADMIN_PASSWORD` for scripting).
 4. **Run.** `docker compose up --build` starts the admin on `https://localhost:8443` and the read-only registry on
-   `http://localhost:8080`. Or without Docker: `npm run build`, then `node packages/admin/dist/admin.cjs serve --config admin.config.json`.
+   `http://localhost:8080`. The registry is the host folder **`./registry-data`** (created on first start, gitignored),
+   served read-only by nginx and written by the admin container. On Linux first run
+   `export OM_UID=$(id -u) OM_GID=$(id -g)` so files the admin writes stay editable by you. Without Docker:
+   `npm run build`, then `node packages/admin/dist/admin.cjs serve --config admin.config.json`.
+5. **Sync, then approve.** Use the dashboard's Sync button. Then sign what you trust **on your own machine**, where the
+   private key lives (it never enters the container):
+   ```
+   node packages/sync/dist/cli.js approve <id@version> --key keys/signing-key.pem --registry registry-data [--override "reason"]
+   ```
+   The registry is served straight from that folder, so the approval is visible to clients immediately and the dashboard
+   shows it as approved. `--override` is needed unless a passing review exists.
 
 `GITHUB_TOKEN` and `ANTHROPIC_API_KEY` reach the service as environment variables (use your orchestrator's secret store).
 
