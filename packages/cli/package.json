@@ -1,0 +1,14 @@
+{
+  "name": "@om/cli",
+  "version": "0.2.0",
+  "type": "module",
+  "bin": {
+    "om": "dist/om.cjs"
+  },
+  "scripts": {
+    "build": "tsc -p . && esbuild src/cli.ts --bundle --platform=node --format=cjs --outfile=dist/om.cjs"
+  },
+  "dependencies": {
+    "@om/shared": "*"
+  }
+}

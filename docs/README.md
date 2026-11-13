@@ -24,6 +24,20 @@ Obsidian's built-in plugin browser cannot be pointed at a custom registry, so th
 `node scripts/bootstrap-vault.mjs <vaultPath> <registryUrl> [publicKeyFile]` (pass the public key to pin it and default to `require-signed`), then in Obsidian turn off Restricted mode
 (Settings > Community plugins) and reload. Use the ribbon store icon or the "Browse internal plugins" command.
 
+## Provisioning vaults with the `om` CLI
+For scripted setup (for example from a vault quickstart), `om` installs and checks plugins in a vault folder without Obsidian running:
+
+```
+om vaults                                      # vaults Obsidian knows (use a name or id as --vault)
+om init --registry URL --key public-key.txt --mode require-signed --vault Personal   # save settings once (or --all-vaults)
+om settings                                    # show what is saved and what is in effect
+om marketplace                                 # install the marketplace plugin and point it at the registry
+om install hello-notes other-plugin@1.2.0      # to the default vault; add --vault V or --all-vaults
+om config  hello-notes --file preset.json [--force]   # merge settings into data.json
+om status | update | verify
+```
+`om init` only saves settings (per user, never any secret) and touches no vault or network. Flags override env (`OM_REGISTRY`, `OM_PUBLIC_KEY`, `OM_TRUST_MODE`, `OM_VAULT`), which override `om.config.json` beside the program, which overrides the saved settings. The target vault is never guessed: it is `--vault`, `--all-vaults`, or the default you saved, and every result line is prefixed with the vault it ran on. It applies the same rules as the plugin: with the default `require-signed` mode only versions with a valid signed approval are installed, and downloads must match the hashes in `versions.json`. Pin the public key out of band (never fetch it from the registry host). `--json` gives machine-readable results; the exit status is non-zero on any failure. Build with `npm run build`; `npm run build:exe` produces a single `dist/om.exe` (the embedded Node binary's Authenticode signature is invalidated, so sign the exe if your policy requires it).
+
 ## Security notes
 Use `require-signed` mode (see [Review, approval & signing](concepts/attestation.md)) so clients install only versions an
 admin approved under a pinned key. Without signatures the sha256 values come from the same registry as the files and

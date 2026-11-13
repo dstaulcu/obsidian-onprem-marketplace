@@ -1,8 +1,8 @@
 import type { App, PluginManifest } from "obsidian";
-import { checkReview, compareSemver, isValidPluginId, selectVersion, type IndexEntry, type TrustMode, type VersionEntry } from "@om/shared";
-import { fetchFile, fetchSigned, fetchVersions, sha256Hex } from "./registry";
+import { compareSemver, isValidPluginId, type IndexEntry, type Trust, type VersionEntry } from "@om/shared";
+import { registry } from "./registry";
 
-export interface Trust { mode: TrustMode; publicKey: string; requireReviewPass?: boolean }
+export type { Trust };
 
 /**
  * All use of Obsidian's undocumented plugin-manager internals (app.plugins) is confined here,
@@ -28,42 +28,24 @@ export function isCompatible(entry: IndexEntry, appVersion: string, isMobile: bo
 }
 
 /** Picks the version to install under the trust policy (newest approved in require-signed mode). */
-export async function resolveVersion(base: string, id: string, trust: Trust, version?: string): Promise<{ entry: VersionEntry; approved: boolean }> {
-  if (!isValidPluginId(id)) throw new Error(`Invalid plugin id: ${id}`);
-  const versions = (await fetchVersions(base, id)).sort((a, b) => compareSemver(b.version, a.version));
-  const { pick, reason } = await selectVersion(id, versions, trust.mode, trust.publicKey, (ver) => fetchSigned(base, id, ver, "approval.json"), version,
-    { requireReviewPass: trust.requireReviewPass, getReview: (ver) => fetchSigned(base, id, ver, "review.json") });
-  if (!pick) throw new Error(`No installable version of ${id}: ${reason ?? "none"}`);
-  return pick;
-}
+export const resolveVersion = (base: string, id: string, trust: Trust, version?: string): Promise<{ entry: VersionEntry; approved: boolean }> =>
+  registry(base).resolveVersion(id, trust, version);
 
-/** Verdict of the signed review for one version: "pass" | "findings" | "fail" | "error", "invalid" if the record does not verify, null if none. */
-export async function reviewStatus(base: string, id: string, entry: VersionEntry, trust: Trust): Promise<string | null> {
-  const s = await fetchSigned(base, id, entry.version, "review.json");
-  if (!s) return null;
-  if (!trust.publicKey) return "unverified";
-  const r = await checkReview(s.bytes, s.sig, trust.publicKey, { id, version: entry.version, actual: entry.sha256 });
-  return r.ok ? r.record.review.verdict : "invalid";
-}
+/** Verdict of the signed review for one version (see RegistryClient.reviewStatus). */
+export const reviewStatus = (base: string, id: string, entry: VersionEntry, trust: Trust): Promise<string | null> =>
+  registry(base).reviewStatus(id, entry, trust);
 
 export async function install(app: App, base: string, id: string, trust: Trust, version?: string): Promise<{ version: string; approved: boolean }> {
   const { entry: v, approved } = await resolveVersion(base, id, trust, version);
 
-  const files: [string, string, ArrayBuffer][] = [];
-  const names: [string, string, string][] = [["main.js", "main", v.sha256.main], ["manifest.json", "manifest", v.sha256.manifest]];
-  if (v.hasStyles) names.push(["styles.css", "styles", v.sha256.styles]);
-  for (const [file, , expected] of names) {
-    const buf = await fetchFile(base, id, v.version, file);
-    if ((await sha256Hex(buf)) !== expected) throw new Error(`Checksum mismatch for ${id}/${file}; refusing to install`);
-    files.push([file, expected, buf]);
-  }
+  const files = await registry(base).fetchVerified(id, v);
 
   const adapter = app.vault.adapter;
   const dir = `${app.vault.configDir}/plugins/${id}`;
   if (!(await adapter.exists(dir))) await adapter.mkdir(dir);
   const wasEnabled = !!mgr(app).plugins[id];
   if (wasEnabled) await mgr(app).disablePluginAndSave(id);
-  for (const [file, , buf] of files) await adapter.writeBinary(`${dir}/${file}`, buf);
+  for (const f of files) await adapter.writeBinary(`${dir}/${f.name}`, f.bytes.buffer.slice(f.bytes.byteOffset, f.bytes.byteOffset + f.bytes.byteLength) as ArrayBuffer);
   if (!v.hasStyles && (await adapter.exists(`${dir}/styles.css`))) await adapter.remove(`${dir}/styles.css`);
 
   await mgr(app).loadManifests();

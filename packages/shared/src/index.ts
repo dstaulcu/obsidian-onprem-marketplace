@@ -1,4 +1,5 @@
 export * from "./attest";
+export * from "./registry";
 
 export interface PluginManifest {
   id: string;

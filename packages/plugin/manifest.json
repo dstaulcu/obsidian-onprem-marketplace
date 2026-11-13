@@ -1,7 +1,7 @@
 {
   "id": "onprem-marketplace",
   "name": "On-Prem Marketplace",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "minAppVersion": "1.5.0",
   "description": "Discover, install and update plugins from your organization's internal registry.",
   "author": "David S.",
