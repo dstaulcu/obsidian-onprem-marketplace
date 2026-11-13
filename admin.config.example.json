@@ -1,0 +1,54 @@
+{
+  "listen": {
+    "host": "0.0.0.0",
+    "port": 8443
+  },
+  "tls": {
+    "cert": "/config/tls/server.crt",
+    "key": "/config/tls/server.key",
+    "clientCa": "/config/tls/admin-ca.crt"
+  },
+  "registryConfig": "/config/registry.config.json",
+  "publicKeyFile": "/config/public-key.txt",
+  "registryUrl": "https://registry.example.internal",
+  "mtls": {
+    "allow": [
+      "alice@example.internal"
+    ]
+  },
+  "password": {
+    "usersFile": "/config/admin-users.json",
+    "idleMinutes": 30,
+    "maxHours": 8,
+    "maxFailures": 5,
+    "lockoutMinutes": 15
+  },
+  "auditLog": "/audit/admin-audit.jsonl",
+  "accessLog": "/logs/access.log",
+  "networks": [
+    {
+      "cidr": "10.20.0.0/16",
+      "name": "Engineering"
+    },
+    {
+      "cidr": "10.0.0.0/8",
+      "name": "Corporate"
+    }
+  ],
+  "stats": {
+    "publish": true,
+    "windowDays": 30,
+    "minCount": 5
+  },
+  "splunk": {
+    "url": "https://splunk.example.internal:8088",
+    "tokenEnv": "SPLUNK_HEC_TOKEN",
+    "index": "obsidian_registry",
+    "sourcetype": "om:event",
+    "caFile": "/config/tls/splunk-ca.crt",
+    "forward": [
+      "access",
+      "audit"
+    ]
+  }
+}

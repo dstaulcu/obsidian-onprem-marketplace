@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @om/shared && npm run build -w @om/sync && npm run build -w @om/cli && npm run build -w onprem-marketplace",
+    "build": "npm run build -w @om/shared && npm run build -w @om/sync && npm run build -w @om/cli && npm run build -w @om/admin && npm run build -w onprem-marketplace",
     "test": "vitest run",
     "build:exe": "node scripts/build-exe.mjs"
   },

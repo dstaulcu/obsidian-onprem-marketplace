@@ -107,6 +107,14 @@ Reviews are produced by Claude Code and by deterministic checks. Treat them as *
    host. `*.pem`, `*.key`, `keys/` and `signing-key*` are gitignored. Clients hold only the public key.
 7. **Rate limits are handled safely.** Sync stops the run with a clear message instead of retrying; nothing partial
    is marked complete (`manifest.json` is written last).
+8. **The optional admin web service has no approve/sign capability.** It can trigger sync and review and show status,
+   behind mTLS and/or password login (see [Admin service](../admin.md)). A compromised admin login cannot sign an
+   approval, but note that mounting `review.signingKeyPath` into it lets it sign review records, which clients using
+   `requireReviewPass` trust. Sessions are in memory, and every allowed admin has the same rights.
+9. **Client activity is inferred, not attested.** The admin service derives it from the web server access log (no
+   client reports anything), so it can be skewed by shared addresses, failed downloads and deliberate requests. It
+   must not feed a trust decision. The published `stats.json` is counts-only, unsigned and display-only. A Splunk HEC
+   token held by the admin service can write to the configured index; scope it to that index only.
 
 ## Data flows and privacy
 

@@ -24,6 +24,10 @@ Obsidian's built-in plugin browser cannot be pointed at a custom registry, so th
 `node scripts/bootstrap-vault.mjs <vaultPath> <registryUrl> [publicKeyFile]` (pass the public key to pin it and default to `require-signed`), then in Obsidian turn off Restricted mode
 (Settings > Community plugins) and reload. Use the ribbon store icon or the "Browse internal plugins" command.
 
+## Hosting the registry with an admin web UI (experimental)
+For a container deployment, `docker compose up` runs the static registry and an admin service (mTLS and/or password
+login, trigger sync/review, see status; approvals stay on the CLI). See [Admin service](admin.md).
+
 ## Provisioning vaults with the `om` CLI
 For scripted setup (for example from a vault quickstart), `om` installs and checks plugins in a vault folder without Obsidian running:
 

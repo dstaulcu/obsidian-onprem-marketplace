@@ -1,0 +1,40 @@
+# Registry + admin. The registry is static files served read-only to clients; the admin service is the only writer.
+# Before first start, see docs/admin.md: create ./config (admin.config.json, registry.config.json with outDir "/data",
+# public-key.txt, TLS certificates) and add an admin with:
+#   node packages/admin/dist/admin.cjs passwd <name> --users config/admin-users.json
+# (run on the host: /config is mounted read-only in the container)
+services:
+  admin:
+    build: .
+    ports: ["8443:8443"]
+    volumes:
+      - registry:/data
+      - audit:/audit
+      - logs:/logs:ro
+      - ./config:/config:ro
+    environment:
+      # Secrets for sync/review jobs. Prefer Docker secrets or your orchestrator's secret store in production.
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:-}
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  registry:
+    image: nginx:stable-alpine
+    ports: ["8080:80"]
+    volumes:
+      - registry:/usr/share/nginx/html:ro
+      - ./deploy/nginx-om.conf:/etc/nginx/conf.d/default.conf:ro
+      - logs:/var/log/om
+    read_only: true
+    tmpfs: ["/var/cache/nginx", "/var/run", "/tmp"]
+    restart: unless-stopped
+
+volumes:
+  registry:
+  audit:
+  logs:
