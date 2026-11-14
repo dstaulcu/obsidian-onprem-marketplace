@@ -6,7 +6,7 @@ import { readdir } from "node:fs/promises";
 
 export interface VersionState {
   version: string; published: string; staged: boolean;
-  review: { verdict: string; signed: boolean; valid: boolean | null } | null;
+  review: { verdict: string; signed: boolean; valid: boolean | null; /** which rubric version the review was made under */ rubricVersion: string | null; model: string | null } | null;
   approval: { ok: boolean; reason?: string; by?: string; override?: string } | null;
 }
 export interface PluginState { id: string; /** owner/repo the plugin was mirrored from, shape-checked; empty if unknown */ repo: string; versions: VersionState[] }
@@ -46,11 +46,16 @@ export async function registryState(outDir: string, publicKey: string): Promise<
       let review: VersionState["review"] = null;
       const rb = await read(join(vdir, "review.json"));
       if (rb) {
-        let verdict = "unknown";
-        try { verdict = String(JSON.parse(new TextDecoder().decode(rb))?.review?.verdict ?? "unknown"); } catch { /* keep unknown */ }
+        let verdict = "unknown", rubricVersion: string | null = null, model: string | null = null;
+        try {
+          const r = JSON.parse(new TextDecoder().decode(rb))?.review;
+          verdict = String(r?.verdict ?? "unknown");
+          if (typeof r?.rubricVersion === "string") rubricVersion = r.rubricVersion.slice(0, 60);
+          if (typeof r?.model === "string") model = r.model.slice(0, 60);
+        } catch { /* keep unknown */ }
         const rs = await readFile(join(vdir, "review.json.sig"), "utf8").catch(() => null);
         const valid = rs && publicKey ? (await checkReview(rb, rs.trim(), publicKey, ctx)).ok : null;
-        review = { verdict, signed: rs !== null, valid };
+        review = { verdict, signed: rs !== null, valid, rubricVersion, model };
       }
 
       let approval: VersionState["approval"] = null;

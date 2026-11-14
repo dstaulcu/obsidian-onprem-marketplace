@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createServer, type Server } from "node:http";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -355,6 +355,76 @@ describe("approving through the signer", () => {
     const noHeader = await fetch(s.base + "/api/approve", { method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: "{}" });
     expect(noHeader.status).toBe(403);
     expect(s.deps.jobs.list().filter((j) => j.kind === "approve")).toHaveLength(0);
+  });
+});
+
+describe("rubric changes and stale reviews", () => {
+  /** Saves a copy of an older rubric (one fewer check, different prompt) the way the admin would have kept it. */
+  async function oldSnapshot(auditFile: string) {
+    const { loadRubric } = await import("../../sync/src/rubric");
+    const { toSnapshot } = await import("../../sync/src/rubricdiff");
+    const cur = toSnapshot(await loadRubric("rubric"));
+    const old = { ...cur, version: "default@bbbbbbbbbb", seenAt: "2026-01-01T00:00:00.000Z", rules: cur.rules.slice(1), prompt: cur.prompt + "\nAn older extra line." };
+    const dir = join(auditFile, "..", "state", "rubrics");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "default_bbbbbbbbbb.json"), JSON.stringify(old));
+    return { old, cur };
+  }
+
+  it("shows the current rubric, remembers it, and needs a login", async () => {
+    const s = await start();
+    expect((await s.call("/api/rubric")).status).toBe(401);
+    const cookie = await s.login();
+    const r = await s.call("/api/rubric", { cookie });
+    expect(r.status).toBe(200);
+    expect(r.data.current.version).toMatch(/^default@[0-9a-f]{10}$/);
+    expect(r.data.current.checks.length).toBeGreaterThan(5);
+    expect(r.data.history.map((h: any) => h.version)).toContain(r.data.current.version);
+    expect((await s.call("/api/plugins", { cookie })).data.rubricVersion).toBe(r.data.current.version);
+  });
+
+  it("flags a review made under another rubric version as stale, compares the versions and reports static impact", async () => {
+    const s = await start();
+    const cookie = await s.login();
+    await s.waitJob((await s.call("/api/sync", { cookie, method: "POST" })).data.job.id, cookie);
+    const { old, cur } = await oldSnapshot(s.audit);
+    const vdir = join(s.outDir, "plugins", "demo", "1.0.0");
+    await writeFile(join(vdir, "review.json"), JSON.stringify({ schema: 1, id: "demo", version: "1.0.0", review: { verdict: "pass", rubricVersion: old.version, model: "m" } }));
+
+    const v = (await s.call("/api/plugins", { cookie })).data.plugins[0].versions[0];
+    expect(v.review.rubricVersion).toBe(old.version); // the page compares this with the current version to show "stale"
+
+    const diff = await s.call("/api/rubric/diff?from=" + encodeURIComponent(old.version), { cookie });
+    expect(diff.status).toBe(200);
+    expect(diff.data.added.map((r: any) => r.id)).toEqual([cur.rules[0].id]);
+    expect(diff.data.promptChanged).toBe(true);
+    expect((await s.call("/api/rubric/diff?from=" + encodeURIComponent("../../etc/passwd"), { cookie })).status).toBe(404);
+    expect((await s.call("/api/rubric/diff", { cookie })).status).toBe(404);
+
+    const impact = await s.call("/api/rubric/impact", { cookie });
+    expect(impact.status).toBe(200);
+    expect(impact.data.rows).toHaveLength(1);
+    expect(impact.data.rows[0]).toMatchObject({ id: "demo", version: "1.0.0", reviewedUnder: old.version, status: "unchanged" }); // "code-1.0.0" trips nothing either way
+    expect(impact.data.counts.unchanged).toBe(1);
+  });
+
+  it("re-review of stale versions validates its choice and reports when nothing is stale", async () => {
+    const s = await start({ review: true });
+    const cookie = await s.login();
+    await s.waitJob((await s.call("/api/sync", { cookie, method: "POST" })).data.job.id, cookie);
+    const bad = await s.call("/api/review", { cookie, body: { stale: "everything" } });
+    expect(bad.status).toBe(400);
+    const none = await s.call("/api/review", { cookie, body: { stale: "all" } }); // nothing has a review yet
+    expect(none.status).toBe(400);
+    expect(none.data.error).toMatch(/no reviewed version is stale/);
+    const { old } = await oldSnapshot(s.audit);
+    await writeFile(join(s.outDir, "plugins", "demo", "1.0.0", "review.json"), JSON.stringify({ schema: 1, review: { verdict: "pass", rubricVersion: old.version, model: "m" } }));
+    const ok = await s.call("/api/review", { cookie, body: { stale: "all" } });
+    expect(ok.status).toBe(202);
+    await s.waitJob(ok.data.job.id, cookie);
+    expect(await readFile(s.audit, "utf8")).toMatch(/"targets":"stale:all \(1\)"/);
+    const changed = await s.call("/api/review", { cookie, body: { stale: "changed" } }); // the static result did not move, so no free-text reason to re-review
+    expect(changed.status).toBe(400);
   });
 });
 

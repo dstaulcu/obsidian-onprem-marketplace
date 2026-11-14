@@ -64,7 +64,7 @@ TLS is mandatory; the service refuses to start without it unless `allowInsecureH
 ## What it can do
 
 `GET /api/plugins` (versions, review verdict, approval state), `POST /api/sync`, `POST /api/review`
-(`{"all":true}` or `{"id","version"}`, plus `"force":true` to redo a single version), `POST /api/approve` (only with a signer), `POST /api/manage`, `GET|POST /api/notes`, `GET /api/jobs[/<id>]`. One job runs at a time (a second request gets 409).
+(`{"all":true}` or `{"id","version"}`, plus `"force":true` to redo a single version), `GET /api/rubric[/diff|/impact]`, `POST /api/approve` (only with a signer), `POST /api/manage`, `GET|POST /api/notes`, `GET /api/jobs[/<id>]`. One job runs at a time (a second request gets 409).
 Approvals and signed reviews are verified with the **public** key; an approval made with another key shows as invalid.
 For anything unapproved the page shows the CLI command to run on the admin host.
 
@@ -173,6 +173,34 @@ network policy.
 - **Image:** `deploy/reviewer/Dockerfile` installs Claude Code from npm (about 850 MB). Pin it with
   `--build-arg CLAUDE_CODE_VERSION=<version>`; the default is `latest`. Without `reviewQueue`, reviews run inside the admin process
   using the configured provider, which then needs its credentials in the admin container.
+
+## Rubric changes and stale reviews
+
+Reviews are made against a **rubric**: the built-in checks plus the instructions given to the model. Its version (for example
+`default@038466eb4c`) is a hash of every check's id, severity, pattern and flags and of the model instructions. So:
+
+- Rewording a check's title, its explanation or its examples does **not** change the version, and cannot change any result.
+- Changing a pattern, a severity, adding or removing a check, or editing the instructions (even one word) **does** change it, and every
+  review made under the old version is then **stale**.
+- The same applies when you change `review.model`: reviews by another model count as out of date.
+
+The rubric ships inside the admin image (`rubric/`), so changing it means editing the repository and rebuilding. Changes go through a pull
+request, and its description is the record of why.
+
+What the dashboard shows:
+
+| Where | What |
+| --- | --- |
+| Plugins tab | A **stale** badge next to a review made under an older rubric, and a **Stale reviews** card. |
+| Rubric tab | The current version and every check with its severity and rationale; a **What changed** comparison against any earlier version the admin has run (it keeps a copy of each version it sees in `<stateDir>/rubrics/`); the versions seen. |
+| Rubric tab, **Check impact** | **Free, no model call.** Re-runs only the deterministic checks over every mirrored version and compares the result with the rubric each review was made under. **Changed** means a check now finds something it did not before, or no longer finds something it did. **Unchanged** means the checks agree. **Cannot compare** means the older rubric was never saved (reviews from before the first snapshot). |
+| Rubric tab, re-review buttons | **Re-review the N whose result changed**, or **Re-review all N stale**. Each is one paid model call per version, behind a second click. |
+
+How to judge significance: a changed static result is the clear signal to re-review. If the checks agree and only the instructions changed,
+the effect is on how the model judges, so re-review only if you care about that drift; the diff shows exactly which instruction lines
+changed. Reviews are not re-run automatically, because each one costs money and replaces the previous record. Approvals are never touched:
+an approval made on the strength of an older review stays valid until you withdraw it. `POST /api/review` takes `{"stale":"changed"}` or
+`{"stale":"all"}`; `GET /api/rubric`, `/api/rubric/diff?from=<version>` and `/api/rubric/impact` back the tab.
 
 ## Client activity (server-side only)
 

@@ -9,6 +9,8 @@ import { SessionStore } from "./auth/session";
 import type { Authenticator } from "./auth/types";
 import { fileAudit } from "./audit";
 import { NoteStore } from "./notes";
+import { loadRubric } from "@om/sync/src/rubric";
+import { saveSnapshot } from "@om/sync/src/rubricdiff";
 import { queueSigner } from "@om/sync/src/signer";
 import { loadAdminConfig } from "./config";
 import { JobRunner } from "./jobs";
@@ -92,6 +94,8 @@ async function main() {
     const activity = cfg.accessLog ? new AccessProcessor({ logFile: cfg.accessLog, stateFile: join(stateDir, "activity.json"), networks: cfg.networks ?? [], basePath: cfg.basePath }) : undefined;
     const forwarder = await buildForwarder(cfg);
     const loadRc = async () => JSON.parse(await readFile(cfg.registryConfig, "utf8")) as Config;
+    // Keep a copy of the rubric this image ships with, so a later change can be compared against it.
+    try { await saveSnapshot(join(stateDir, "rubrics"), await loadRubric((await loadRc()).review?.rubricDir ?? "rubric")); } catch (e) { console.warn("rubric snapshot skipped:", (e as Error).message); }
     // With a review queue, the model call happens in the separate reviewer container and never in this process.
     let reviewOpts: ReviewOpts | undefined;
     if (cfg.reviewQueue) {

@@ -9,7 +9,9 @@ import type { QueueSigner } from "@om/sync/src/signer";
 import { findEntry } from "@om/sync/src/catalog";
 import { checkApproval } from "@om/shared";
 import { mkdir, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { loadRubric, type Rubric } from "@om/sync/src/rubric";
+import { diffSnapshots, listSnapshots, loadSnapshot, saveSnapshot, staleTargets, staticImpact, toSnapshot } from "@om/sync/src/rubricdiff";
 import { NoteError, type NoteStore } from "./notes";
 import type { Audit } from "./audit";
 import type { AdminConfig } from "./config";
@@ -49,6 +51,13 @@ export interface Deps {
 const COOKIE = "om_session";
 const json = (res: ServerResponse, status: number, body: unknown) => { res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body)); };
 
+/** Loads the rubric shipped with the admin and keeps a copy of this version, so it can be compared with later ones. */
+async function rubricCtx(d: Deps, rc: Config): Promise<{ current: Rubric; snapDir: string }> {
+  const current = await loadRubric(rc.review?.rubricDir ?? "rubric");
+  const snapDir = join(d.cfg.stateDir ?? join(dirname(d.cfg.auditLog), "state"), "rubrics");
+  await saveSnapshot(snapDir, current);
+  return { current, snapDir };
+}
 /** Web address used for "report an issue" links: the configured one, else derived from the GitHub API address. */
 function githubWebBase(configured: string | undefined, apiBase: string): string {
   if (configured) return configured;
@@ -145,7 +154,7 @@ export function createHandler(d: Deps): RequestListener {
       }
       if (method === "GET" && path === "/api/plugins") {
         const rc = await d.loadRegistryConfig();
-        json(res, 200, { registryUrl: d.cfg.registryUrl ?? null, githubWebBase: githubWebBase(d.cfg.githubWebBase, rc.githubApiBase), publishPolicy: rc.publishPolicy ?? "all", notes: !!d.notes, canApprove: !!d.signer, plugins: await registryState(rc.outDir, d.publicKey) });
+        json(res, 200, { registryUrl: d.cfg.registryUrl ?? null, githubWebBase: githubWebBase(d.cfg.githubWebBase, rc.githubApiBase), publishPolicy: rc.publishPolicy ?? "all", notes: !!d.notes, canApprove: !!d.signer, rubricVersion: (await rubricCtx(d, rc).catch(() => null))?.current.version ?? null, plugins: await registryState(rc.outDir, d.publicKey) });
         return;
       }
       if (method === "GET" && path === "/api/jobs") {
@@ -175,8 +184,14 @@ export function createHandler(d: Deps): RequestListener {
         if (!rc.review) throw new HttpError(400, "no \"review\" section in the registry config");
         let targets: { id: string; version: string }[];
         if (body.all === true) targets = await allVersions(rc.outDir);
+        else if (body.stale === "all" || body.stale === "changed") {
+          // Re-review after a rubric (or model) change: every stale version, or only those whose deterministic result would move.
+          const { current, snapDir } = await rubricCtx(d, rc).catch((e: Error) => { throw new HttpError(503, "cannot load the rubric: " + e.message); });
+          targets = await staleTargets(rc.outDir, current, snapDir, body.stale, rc.review.model);
+          if (!targets.length) throw new HttpError(400, body.stale === "changed" ? "no version's static result would change under the current rubric" : "no reviewed version is stale");
+        }
         else if (typeof body.id === "string" && typeof body.version === "string" && isValidPluginId(body.id) && isSafeVersion(body.version)) targets = [{ id: body.id, version: body.version }];
-        else throw new HttpError(400, "send {\"all\":true} or {\"id\",\"version\"}");
+        else throw new HttpError(400, "send {\"all\":true}, {\"stale\":\"all\"|\"changed\"} or {\"id\",\"version\"}");
         // Fail fast and visibly when the reviewer container is down, instead of queueing work that would time out one version at a time.
         const why = await d.reviewOpts?.preflight?.();
         if (why) throw new HttpError(503, why);
@@ -184,8 +199,37 @@ export function createHandler(d: Deps): RequestListener {
           await runReviews(rc, targets, log, d.env, { ...d.reviewOpts, force: body.all !== true && body.force === true });
           await publishHeld(rc.outDir, rc.publishPolicy ?? "all", log);
         });
-        await d.audit.record(who.name, "review.start", { job: job.id, targets: body.all === true ? "all" : `${targets[0].id}@${targets[0].version}` }, ip);
+        await d.audit.record(who.name, "review.start", { job: job.id, targets: body.all === true ? "all" : body.stale ? `stale:${body.stale} (${targets.length})` : `${targets[0].id}@${targets[0].version}` }, ip);
         json(res, 202, { job });
+        return;
+      }
+      if (method === "GET" && path === "/api/rubric") {
+        // The rubric the admin reviews with: what it checks now, and the earlier versions it has seen (for comparing).
+        const rc = await d.loadRegistryConfig();
+        const { current, snapDir } = await rubricCtx(d, rc).catch((e: Error) => { throw new HttpError(503, "cannot load the rubric: " + e.message); });
+        json(res, 200, {
+          current: { name: current.name, version: current.version, promptLines: current.prompt.split("\n").filter((l) => l.trim()).length, checks: current.rules.map((r) => ({ id: r.id, title: r.title, severity: r.severity, why: r.why })) },
+          history: await listSnapshots(snapDir),
+          note: "The rubric ships inside the admin image; to change it, change the repository's rubric folder and rebuild. A new version makes earlier reviews stale.",
+        });
+        return;
+      }
+      if (method === "GET" && path === "/api/rubric/diff") {
+        const rc = await d.loadRegistryConfig();
+        const { current, snapDir } = await rubricCtx(d, rc).catch((e: Error) => { throw new HttpError(503, "cannot load the rubric: " + e.message); });
+        const from = new URL(req.url ?? "/", "http://x").searchParams.get("from") ?? "";
+        const old = await loadSnapshot(snapDir, from);
+        if (!old) throw new HttpError(404, "no saved copy of that rubric version");
+        json(res, 200, diffSnapshots(old, toSnapshot(current)));
+        return;
+      }
+      if (method === "GET" && path === "/api/rubric/impact") {
+        // Free: re-runs only the deterministic checks over every mirrored version. No model is called.
+        const rc = await d.loadRegistryConfig();
+        const { current, snapDir } = await rubricCtx(d, rc).catch((e: Error) => { throw new HttpError(503, "cannot load the rubric: " + e.message); });
+        const rows = await staticImpact(rc.outDir, current, snapDir);
+        const count = (s: string) => rows.filter((r) => r.status === s).length;
+        json(res, 200, { version: current.version, model: rc.review?.model ?? null, counts: { current: count("current"), unreviewed: count("unreviewed"), unchanged: count("unchanged"), changed: count("changed"), unknown: count("unknown") }, rows });
         return;
       }
       if (method === "POST" && path === "/api/approve") {

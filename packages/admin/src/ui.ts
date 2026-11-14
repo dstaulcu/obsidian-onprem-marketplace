@@ -35,6 +35,7 @@ export const INDEX_HTML = `<!doctype html>
       <button id="review" class="btn" type="button">Review all</button>
       <span id="running" class="running" hidden><span class="spinner" aria-hidden="true"></span><span id="runningtext"></span></span>
       <span class="spacer"></span>
+      <button id="rubricchip" class="btn ghost" type="button" hidden title="The rubric (set of checks) reviews are made against. Click for details."></button>
       <span id="updated" class="muted small"></span>
       <button id="refresh" class="btn ghost" type="button">Refresh</button>
     </div>
@@ -54,6 +55,7 @@ export const INDEX_HTML = `<!doctype html>
       <div id="clients"></div>
     </div>
     <div id="panel-activity" class="panel" role="tabpanel" hidden><div id="activity"></div></div>
+    <div id="panel-rubric" class="panel" role="tabpanel" hidden><div id="rubric"></div></div>
     <div id="panel-forwarding" class="panel" role="tabpanel" hidden><div id="forwarder"></div></div>
     <div id="panel-jobs" class="panel" role="tabpanel" hidden>
       <div id="jobs" class="joblist"></div>
@@ -175,6 +177,12 @@ textarea{font:inherit;color:var(--text);background:var(--surface);border:1px sol
 .note{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:.55rem .75rem}
 .notemeta{color:var(--muted);font-size:12px;margin-bottom:.2rem}.notetext{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
 .btn.danger{border-color:var(--bad);color:var(--bad)}.reasoninput{width:15rem;padding:.2rem .5rem;font-size:12px}.issuelink{font-size:12px;color:var(--accent)}
+.diffbox{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;margin:.6rem 0}
+.diffbox ul{margin:.3rem 0 .6rem 1.1rem;padding:0}.diffbox li{margin:.15rem 0}
+.diffline{font:12.5px/1.5 ui-monospace,SFMono-Regular,Consolas,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.diffline.add{color:var(--ok)}.diffline.del{color:var(--bad)}
+.rubricbar{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin:.6rem 0}
+select{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.4rem .6rem;max-width:100%}
 @media (max-width:640px){main{padding:.75rem}.top{padding:.6rem .75rem}td,th{padding:.5rem .6rem}}`;
 
 export const APP_JS = `(() => {
@@ -208,7 +216,7 @@ function applyFilter(input, root, selector) {
 }
 
 // ---- state shared between panels and the summary cards
-const S = { plugins: [], clients: null, activity: null, jobs: [], selectedJob: null, registryUrl: "", githubWebBase: "", canApprove: false, notesOn: false, notes: [], drawer: null };
+const S = { plugins: [], clients: null, activity: null, jobs: [], selectedJob: null, registryUrl: "", githubWebBase: "", canApprove: false, rubricVersion: "", notesOn: false, notes: [], drawer: null };
 let polling = null, activeTab = "plugins", jobRunning = false;
 
 function say(text, kind) { const b = $("banner"); if (!text) { b.hidden = true; return; } b.textContent = text; b.className = "banner" + (kind ? " " + kind : ""); b.hidden = false; }
@@ -224,6 +232,7 @@ function renderCards() {
     card("Approved", approved + " / " + vs.length, "signed and verified", vs.length && approved === vs.length ? "ok" : ""),
     card("Awaiting approval", waiting, held ? held + " held back from clients" : "nothing held back", waiting ? "warn" : "ok"),
     ...(invalid ? [card("Invalid approvals", invalid, "signature does not verify", "bad")] : []));
+  const stale = vs.filter(isStale).length; if (stale) box.append(card("Stale reviews", stale, "made under an older rubric", "warn"));
   if (S.clients && S.clients.enabled) {
     const day = S.clients.clients.filter((c) => Date.now() - Date.parse(c.last) < 86400000).length;
     box.append(card("Clients, 24 h", day, S.clients.clients.length + " known"));
@@ -243,8 +252,12 @@ function reviewBadge(r) {
   if (!r) return badge("No review", "muted");
   const sig = r.signed ? (r.valid === false ? "BAD SIGNATURE" : r.valid ? "signed" : "signed, unverified") : "unsigned";
   const kind = r.valid === false ? "bad" : r.verdict === "pass" ? "ok" : r.verdict === "fail" ? "bad" : "warn";
-  return badge(String(r.verdict), kind, "Review " + sig);
+  const b = badge(String(r.verdict), kind, "Review " + sig);
+  const stale = S.rubricVersion && r.rubricVersion && r.rubricVersion !== S.rubricVersion;
+  if (!stale) return b;
+  return h("span", "revcell", b, badge("stale", "warn", "Reviewed under rubric " + r.rubricVersion + "; the current rubric is " + S.rubricVersion + ". See the Rubric tab for what changed."));
 }
+const isStale = (v) => !!(v.review && S.rubricVersion && v.review.rubricVersion && v.review.rubricVersion !== S.rubricVersion);
 // The full findings live in review.html in the registry (the same report clients can open). It is built from a validated
 // id and version plus the configured registry address, never from a value found in registry data, and opens in a new tab on the
 // registry origin so nothing in it runs with the admin page's session.
@@ -255,13 +268,13 @@ function reportLink(id, version) {
   return a;
 }
 // A button that needs a second click within a few seconds, so a stray click cannot withdraw a version (no browser dialogs).
-function confirmButton(label, ask, fn, danger) {
+function confirmButton(label, ask, fn, danger, title) {
   const b = h("button", "btn tiny rowbtn" + (danger ? " danger" : ""), label); b.type = "button"; b.disabled = jobRunning; let timer = null;
   b.onclick = () => {
     if (timer) { clearTimeout(timer); timer = null; b.textContent = label; fn(); return; }
     b.textContent = ask + " Click again"; timer = setTimeout(() => { timer = null; b.textContent = label; }, 4000);
   };
-  b.title = label === "Release" ? "Publish this held-back version to clients (the publish policy still applies)" : "Remove the approval and hide this version from clients. Copies already installed stay installed.";
+  b.title = title || (label === "Release" ? "Publish this held-back version to clients (the publish policy still applies)" : "Remove the approval and hide this version from clients. Copies already installed stay installed.");
   return b;
 }
 // Approve: the signing key is not in this page or in the admin service. The request goes to the signer container, which re-checks the
@@ -291,7 +304,7 @@ async function runJob(path, body) {
     if (j.data && j.data.status !== "running") { say(j.data.status === "done" ? (j.data.output[0] || "Done.") : (j.data.error || "Failed."), j.data.status === "done" ? "ok" : "bad"); break; }
     await new Promise((x) => setTimeout(x, 400));
   }
-  await showPlugins(); await showJobs(); renderCards();
+  await showPlugins(); await showJobs(); renderCards(); await showRubric();
 }
 
 // "Report an issue": opens the repository's new-issue page with a short prefilled text. The person reviews and posts it under
@@ -340,7 +353,7 @@ function reviewButton(id, version, verdict) {
 }
 async function showPlugins() {
   const { data } = await api("/api/plugins"); S.plugins = (data && data.plugins) || []; S.registryUrl = (data && typeof data.registryUrl === "string") ? data.registryUrl : ""; S.githubWebBase = (data && typeof data.githubWebBase === "string") ? data.githubWebBase : "";
-  S.canApprove = !!(data && data.canApprove); S.notesOn = !!(data && data.notes); if (S.notesOn) { const n = await api("/api/notes"); S.notes = (n.data && n.data.notes) || []; } const box = $("plugins"); box.replaceChildren();
+  S.canApprove = !!(data && data.canApprove); S.rubricVersion = (data && typeof data.rubricVersion === "string") ? data.rubricVersion : ""; S.notesOn = !!(data && data.notes); if (S.notesOn) { const n = await api("/api/notes"); S.notes = (n.data && n.data.notes) || []; } const box = $("plugins"); box.replaceChildren();
   if (!S.plugins.length) box.append(empty("Nothing mirrored yet", "Click Sync now to pull releases from the configured repositories."));
   for (const p of S.plugins) {
     const g = h("section", "group"); g.dataset.q = p.id.toLowerCase() + " " + p.versions.map((v) => v.version).join(" ");
@@ -381,6 +394,82 @@ async function showActivity() {
   box.append(h("div", "standalone", tbl(["Time", "Event", "Plugin", "Version", "File", "HTTP", "Client", "Zone"], data.events.map((e) => [when(e.time),
     e.install ? badge("install / update", "ok", "Successful download of main.js") : badge(e.type === "catalog.check" ? "check" : e.type, "muted"), e.plugin || "", h("span", "mono", e.version || ""), e.file || "",
     badge(String(e.status), e.status >= 400 ? "bad" : "muted"), clientName(e.client), e.zone || ""]))));
+}
+
+// ---- rubric: what reviews are checked against, what changed, and whether a change matters
+const sevKind = (x) => (x === "high" ? "bad" : "warn");
+async function showRubric() {
+  const { status, data } = await api("/api/rubric"); const box = $("rubric"); box.replaceChildren();
+  const chip = $("rubricchip");
+  if (status !== 200 || !data) { chip.hidden = true; box.append(empty("The rubric could not be loaded", (data && data.error) || "")); return; }
+  const cur = data.current; chip.hidden = false; chip.textContent = "Rubric " + cur.version; chip.onclick = () => selectTab("rubric");
+  const vs = S.plugins.flatMap((p) => p.versions), reviewed = vs.filter((v) => v.review), stale = vs.filter(isStale).length;
+  box.append(h("p", null, h("strong", null, cur.version), " - " + cur.checks.length + " checks and " + cur.promptLines + " lines of model instructions. ",
+    stale ? badge(stale + " of " + reviewed.length + " reviews are stale", "warn") : badge("all " + reviewed.length + " reviews are current", "ok")));
+  box.append(h("p", "muted small", data.note));
+
+  // what changed
+  box.append(h("h2", "section", "What changed"));
+  const others = data.history.filter((x) => x.version !== cur.version);
+  if (!others.length) box.append(h("p", "muted", "No earlier rubric version has been seen yet. The admin keeps a copy of each version it runs, so a comparison appears here after the rubric changes."));
+  else {
+    const sel = h("select"); sel.setAttribute("aria-label", "Compare the current rubric with an earlier version");
+    sel.append(h("option", null, "Compare the current rubric with..."));
+    for (const x of others.slice().reverse()) { const o = h("option", null, x.version + " (first seen " + rel(x.seenAt) + ")"); o.value = x.version; sel.append(o); }
+    const out = h("div"); sel.onchange = async () => { out.replaceChildren(); if (!sel.value || sel.selectedIndex === 0) return; out.append(await renderDiff(sel.value)); };
+    box.append(h("div", "rubricbar", sel), out);
+  }
+
+  // does it matter
+  box.append(h("h2", "section", "Impact on existing reviews"));
+  box.append(h("p", "muted small", "Free: re-runs only the built-in checks (no model is called) over every mirrored version and compares the result with the rubric each review was made under. A changed result means a check now finds something it did not before, or stopped finding it. Unchanged means the checks agree; a model re-review then only matters if the model instructions changed."));
+  const impactBox = h("div"); const go = h("button", "btn", "Check impact"); go.type = "button";
+  go.onclick = async () => { go.disabled = true; try { await renderImpact(impactBox); } finally { go.disabled = false; } };
+  box.append(h("div", "rubricbar", go), impactBox);
+
+  // the checks themselves
+  box.append(h("h2", "section", "Current checks"));
+  box.append(h("div", "standalone", tbl(["Check", "Severity", "What it looks for and why"], cur.checks.map((c) => [h("span", null, c.title, h("br"), h("code", null, c.id)), badge(c.severity, sevKind(c.severity)), c.why]))));
+  if (data.history.length) {
+    box.append(h("h2", "section", "Versions seen"));
+    box.append(h("div", "standalone", tbl(["Version", "First seen", ""], data.history.slice().reverse().map((x) => [h("span", "mono", x.version), when(x.seenAt), x.version === cur.version ? badge("current", "ok") : ""]))));
+  }
+}
+async function renderDiff(from) {
+  const { status, data } = await api("/api/rubric/diff?from=" + encodeURIComponent(from));
+  if (status !== 200) return h("p", "err", (data && data.error) || "Could not compare.");
+  const box = h("div", "diffbox"); const ul = h("ul"); for (const line of data.summary) ul.append(h("li", null, line)); box.append(ul);
+  const list = (title, rows) => { if (!rows.length) return; box.append(h("strong", null, title)); const u = h("ul"); for (const r of rows) u.append(h("li", null, r)); box.append(u); };
+  list("New checks", data.added.map((r) => r.title + " (" + r.id + ", " + r.severity + ")"));
+  list("Removed checks", data.removed.map((r) => r.title + " (" + r.id + ")"));
+  list("Changed checks", data.changed.map((c) => c.title + " (" + c.id + "): " + c.changes.join(", ")));
+  list("Wording only (cannot change a result)", data.cosmetic);
+  if (data.promptChanged) {
+    box.append(h("strong", null, "Model instructions"));
+    for (const l of data.promptLines.removed) box.append(h("div", "diffline del", "- " + l));
+    for (const l of data.promptLines.added) box.append(h("div", "diffline add", "+ " + l));
+    if (data.promptLines.addedCount > data.promptLines.added.length || data.promptLines.removedCount > data.promptLines.removed.length) box.append(h("div", "muted small", "(only the first lines of each are shown)"));
+  }
+  return box;
+}
+async function renderImpact(box) {
+  box.replaceChildren(h("p", "muted", "Checking..."));
+  const { status, data } = await api("/api/rubric/impact"); box.replaceChildren();
+  if (status !== 200) { box.append(h("p", "err", (data && data.error) || "Could not check.")); return; }
+  const c = data.counts, stale = c.changed + c.unchanged + c.unknown;
+  box.append(h("p", null, badge(c.current + " current", "ok"), " ", badge(c.unchanged + " unchanged", "muted"), " ", badge(c.changed + " changed", c.changed ? "bad" : "muted"), " ", badge(c.unknown + " cannot compare", c.unknown ? "warn" : "muted"), " ", badge(c.unreviewed + " not reviewed yet", "muted")));
+  const rows = data.rows.filter((r) => r.status === "changed" || r.status === "unchanged" || r.status === "unknown");
+  if (rows.length) box.append(h("div", "standalone", tbl(["Plugin", "Version", "Reviewed under", "Verdict", "Built-in checks now", "Newly found", "No longer found"], rows.map((r) => [r.id, h("span", "mono", r.version), r.reviewedUnder || "?", r.reviewVerdict || "",
+    badge(r.status === "unknown" ? "cannot compare" : r.status, r.status === "changed" ? "bad" : r.status === "unknown" ? "warn" : "muted", r.status === "unknown" ? "No saved copy of the rubric this review was made under" : undefined),
+    r.newHits.map((x) => x.rule + " (" + x.severity + ")").join(", "), r.goneHits.map((x) => x.rule).join(", ")]))));
+  else box.append(h("p", "muted", "No reviews are stale: nothing to compare."));
+  const bar = h("div", "rubricbar");
+  const costNote = (n) => n + " model review" + (n === 1 ? "" : "s");
+  const b1 = confirmButton("Re-review the " + c.changed + " whose result changed", "Run " + costNote(c.changed) + "?", () => runJob("/api/review", { stale: "changed" }), false, "Re-review only the versions whose built-in check results would change under the current rubric");
+  const b2 = confirmButton("Re-review all " + stale + " stale", "Run " + costNote(stale) + "?", () => runJob("/api/review", { stale: "all" }), false, "Re-review every version whose review was made under an older rubric or another model");
+  b1.disabled = !c.changed; b2.disabled = !stale; b1.classList.remove("rowbtn"); b2.classList.remove("rowbtn");
+  bar.append(b1, b2); box.append(bar);
+  box.append(h("p", "muted small", "Each re-review is one paid model call and replaces that version's review. Approvals are not touched, but an approval made on the strength of an older review stays valid until you withdraw it."));
 }
 
 // ---- forwarding
@@ -425,7 +514,7 @@ async function start(kind, body) {
 }
 
 // ---- tabs
-const TABS = [["plugins", "Plugins"], ["clients", "Clients"], ["activity", "Activity"], ["forwarding", "Forwarding"], ["jobs", "Jobs"]];
+const TABS = [["plugins", "Plugins"], ["clients", "Clients"], ["activity", "Activity"], ["rubric", "Rubric"], ["forwarding", "Forwarding"], ["jobs", "Jobs"]];
 function buildTabs() {
   const box = $("tabs"); box.replaceChildren();
   for (const [id, label] of TABS) { const b = h("button", "tab", label); b.type = "button"; b.setAttribute("role", "tab"); b.dataset.tab = id;
@@ -445,7 +534,7 @@ function initTheme() { let m = "auto"; try { m = localStorage.getItem("om-theme"
   $("theme").onclick = () => { const cur = document.documentElement.dataset.theme || "auto"; const next = cur === "auto" ? "light" : cur === "light" ? "dark" : "auto"; applyTheme(next); try { localStorage.setItem("om-theme", next); } catch {} }; }
 
 async function refreshAll() {
-  await Promise.all([showPlugins(), showClients(), showActivity(), showForwarder(), showJobs()]);
+  await Promise.all([showPlugins(), showClients(), showActivity(), showForwarder(), showJobs()]); await showRubric();
   $("updated").textContent = "Updated " + new Date().toLocaleTimeString(); renderCards();
 }
 async function init() {
