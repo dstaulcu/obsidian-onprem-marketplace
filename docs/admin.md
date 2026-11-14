@@ -63,12 +63,47 @@ TLS is mandatory; the service refuses to start without it unless `allowInsecureH
 ## What it can do
 
 `GET /api/plugins` (versions, review verdict, approval state), `POST /api/sync`, `POST /api/review`
-(`{"all":true}` or `{"id","version"}`), `GET /api/jobs[/<id>]`. One job runs at a time (a second request gets 409).
+(`{"all":true}` or `{"id","version"}`, plus `"force":true` to redo a single version), `POST /api/manage`, `GET|POST /api/notes`, `GET /api/jobs[/<id>]`. One job runs at a time (a second request gets 409).
 Approvals and signed reviews are verified with the **public** key; an approval made with another key shows as invalid.
 For anything unapproved the page shows the CLI command to run on the admin host.
 
 Every login, denial, sync and review is appended to the audit log (`auditLog`, JSON lines, who/what/when/address; never
 passwords or request bodies). Keep it on a volume that the registry web server cannot serve.
+
+## Managing versions
+
+Each version row in the Plugins tab has **Withdraw** (or **Release** for a held-back version). Both ask for a second click.
+The API is `POST /api/manage` with `{"action","id","version"}`, where action is one of:
+
+| Action | Effect |
+| --- | --- |
+| `withdraw` | Removes the approval and moves the version from `versions.json` to `staged.json`, so clients no longer see it. |
+| `revoke` | Removes only the approval (`approval.json` and its signature). |
+| `hold` | Hides a published version without touching its approval. |
+| `release` | Publishes a held-back version again, but only if the publish policy allows it (with `approved`, it needs a valid approval; with `reviewed-pass`, a passing review). |
+
+These only ever make the clients' view stricter, or restore what the policy already permits. None of them can create an approval.
+They run as audited jobs (`manage.<action>`), so they cannot interleave with a sync or review. **Copies already installed on
+clients stay installed**: clients cannot be told to uninstall, and there is no signed revocation list yet (see
+[Security](concepts/security.md)). The files stay in the registry, so a withdrawn version can be released again.
+
+## Reporting findings to the plugin's repository
+
+A reviewed version with verdict `findings` or `fail` gets a **Report issue** link. It opens the plugin repository's new-issue page with a
+short prefilled title and text (the verdict and a link to the full report) in a new tab. You read it, edit it and post it under your own
+GitHub login: nothing is sent from the admin and no token is involved. The text never contains model output, because that is derived
+from untrusted code. The link is built from the repository recorded in `index.json` (shape-checked) and the GitHub web address, which
+defaults to the host of `githubApiBase` (`api.github.com` becomes `https://github.com`); set `githubWebBase` in the admin config to
+override it for an on-prem server. Consider whether a public repository is the right place for a security finding before posting it.
+
+## Triage notes
+
+The **Notes** button on a version row opens a side panel where any admin can leave a plain-text note (up to 2000 characters, plus an
+optional reference such as a ticket number). Notes are shared between admins, append-only, and stored in `<stateDir>/notes.jsonl`,
+one JSON object per line, never in the served registry. They are for people: they do not affect what clients can install. The file
+is meant to be easy to consume elsewhere (`GET /api/notes`, or read the file), and each note produces a `note.add` audit event (ids only,
+not the text), so a log shipper or ticketing integration can react to it. There are deliberately no statuses or assignees; a ticketing
+system is better at that.
 
 ## Reviews in a separate container
 

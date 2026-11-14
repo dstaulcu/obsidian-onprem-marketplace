@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import { isSafeVersion, isValidPluginId } from "@om/shared";
 import type { Config, Fetcher } from "@om/sync/src/sync";
 import { allVersions, publishHeld, runReviews, runSync, type ReviewOpts } from "@om/sync/src/jobs";
+import { manageVersion, MANAGE_ACTIONS, type ManageAction } from "@om/sync/src/manage";
+import { NoteError, type NoteStore } from "./notes";
 import type { Audit } from "./audit";
 import type { AdminConfig } from "./config";
 import { Busy, JobRunner } from "./jobs";
@@ -21,6 +23,8 @@ export interface Deps {
   loadRegistryConfig(): Promise<Config>;
   /** Where reviews run (the queue to the reviewer container). Unset: in-process. */
   reviewOpts?: ReviewOpts;
+  /** Shared triage notes. Unset: the notes API answers 404. */
+  notes?: NoteStore;
   publicKey: string;
   audit: Audit;
   authenticators: Authenticator[];
@@ -38,6 +42,11 @@ export interface Deps {
 const COOKIE = "om_session";
 const json = (res: ServerResponse, status: number, body: unknown) => { res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body)); };
 
+/** Web address used for "report an issue" links: the configured one, else derived from the GitHub API address. */
+function githubWebBase(configured: string | undefined, apiBase: string): string {
+  if (configured) return configured;
+  try { const u = new URL(apiBase); return u.hostname === "api.github.com" ? "https://github.com" : u.origin; } catch { return ""; }
+}
 class HttpError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -129,7 +138,7 @@ export function createHandler(d: Deps): RequestListener {
       }
       if (method === "GET" && path === "/api/plugins") {
         const rc = await d.loadRegistryConfig();
-        json(res, 200, { registryUrl: d.cfg.registryUrl ?? null, plugins: await registryState(rc.outDir, d.publicKey) });
+        json(res, 200, { registryUrl: d.cfg.registryUrl ?? null, githubWebBase: githubWebBase(d.cfg.githubWebBase, rc.githubApiBase), publishPolicy: rc.publishPolicy ?? "all", notes: !!d.notes, plugins: await registryState(rc.outDir, d.publicKey) });
         return;
       }
       if (method === "GET" && path === "/api/jobs") {
@@ -171,6 +180,32 @@ export function createHandler(d: Deps): RequestListener {
         await d.audit.record(who.name, "review.start", { job: job.id, targets: body.all === true ? "all" : `${targets[0].id}@${targets[0].version}` }, ip);
         json(res, 202, { job });
         return;
+      }
+      if (method === "POST" && path === "/api/manage") {
+        // Withdraw / hold back / release / revoke approval. Runs as a job so it cannot interleave with a sync or review.
+        const body = await readJson(req);
+        const rc = await d.loadRegistryConfig();
+        if (typeof body.id !== "string" || typeof body.version !== "string" || !isValidPluginId(body.id) || !isSafeVersion(body.version)) throw new HttpError(400, "send {action, id, version}");
+        if (!MANAGE_ACTIONS.includes(body.action as ManageAction)) throw new HttpError(400, "action must be one of " + MANAGE_ACTIONS.join(", "));
+        const { id, version } = body as { id: string; version: string };
+        const action = body.action as ManageAction;
+        const job = d.jobs.start("manage", who.name, async (log) => { log.log(await manageVersion(rc.outDir, id, version, action, rc.publishPolicy ?? "all")); });
+        await d.audit.record(who.name, "manage." + action, { job: job.id, target: id + "@" + version }, ip);
+        json(res, 202, { job });
+        return;
+      }
+      if (path === "/api/notes") {
+        if (!d.notes) throw new HttpError(404, "notes are not enabled");
+        if (method === "GET") { json(res, 200, { notes: await d.notes.list() }); return; }
+        if (method === "POST") {
+          const body = await readJson(req);
+          try {
+            const n = await d.notes.add(who.name, body.plugin, body.version, body.text, body.ref);
+            await d.audit.record(who.name, "note.add", { target: n.plugin + "@" + n.version, note: n.id }, ip);
+            json(res, 201, { note: n });
+          } catch (e) { if (e instanceof NoteError) throw new HttpError(400, e.message); throw e; }
+          return;
+        }
       }
       if (method === "GET" && path === "/api/clients") {
         if (!d.activity) { json(res, 200, { enabled: false, clients: [], adoption: [] }); return; }

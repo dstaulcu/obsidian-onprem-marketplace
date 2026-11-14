@@ -141,6 +141,7 @@ export async function rebuildIndex(outDir: string, repoHints: Record<string, str
     if (!(await exists(vpath))) continue;
     const versions: VersionEntry[] = JSON.parse(await readFile(vpath, "utf8"));
     const latest = versions[0];
+    if (!latest) continue; // every version is held back: the plugin is not listed
     const m: PluginManifest = JSON.parse(await readFile(join(pluginsDir, id, latest.version, "manifest.json"), "utf8"));
     entries.push({
       id, name: m.name, author: m.author, description: m.description,

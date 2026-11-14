@@ -8,6 +8,7 @@ import { mtlsAuthenticator } from "./auth/mtls";
 import { SessionStore } from "./auth/session";
 import type { Authenticator } from "./auth/types";
 import { fileAudit } from "./audit";
+import { NoteStore } from "./notes";
 import { loadAdminConfig } from "./config";
 import { JobRunner } from "./jobs";
 import { createAdminServer } from "./server";
@@ -100,7 +101,7 @@ async function main() {
     }
     const server = await createAdminServer({
       cfg, publicKey, authenticators, activity, forwarder, jobs: new JobRunner(), audit: fileAudit(cfg.auditLog), secure: !!cfg.tls, env: process.env,
-      loadRegistryConfig: loadRc, reviewOpts,
+      loadRegistryConfig: loadRc, reviewOpts, notes: new NoteStore(join(stateDir, "notes.jsonl")),
       password: p ? {
         usersFile: p.usersFile,
         sessions: new SessionStore((p.idleMinutes ?? 30) * 60_000, (p.maxHours ?? 8) * 3_600_000),

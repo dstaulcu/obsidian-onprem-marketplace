@@ -9,7 +9,7 @@ export interface VersionState {
   review: { verdict: string; signed: boolean; valid: boolean | null } | null;
   approval: { ok: boolean; reason?: string; by?: string; override?: string } | null;
 }
-export interface PluginState { id: string; versions: VersionState[] }
+export interface PluginState { id: string; /** owner/repo the plugin was mirrored from, shape-checked; empty if unknown */ repo: string; versions: VersionState[] }
 
 const read = (p: string) => readFile(p).then((b) => new Uint8Array(b) as Uint8Array<ArrayBuffer>, () => null);
 
@@ -18,10 +18,22 @@ const read = (p: string) => readFile(p).then((b) => new Uint8Array(b) as Uint8Ar
  * without one, signed records are reported as unverified rather than trusted. The folder holds data mirrored from
  * third-party repos, so every string here is untrusted and the UI must render it as text.
  */
+const REPO_RE = /^[A-Za-z0-9_.-]+[/][A-Za-z0-9_.-]+$/;
+/** id -> owner/repo from index.json. It is data from the registry folder, so it is shape-checked before anyone builds a link from it. */
+async function readRepos(outDir: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  try {
+    for (const e of JSON.parse(await readFile(join(outDir, "index.json"), "utf8")) as { id?: unknown; repo?: unknown }[])
+      if (typeof e.id === "string" && typeof e.repo === "string" && REPO_RE.test(e.repo)) out[e.id] = e.repo;
+  } catch { /* no index yet */ }
+  return out;
+}
+
 export async function registryState(outDir: string, publicKey: string): Promise<PluginState[]> {
   let ids: string[] = [];
   try { ids = await readdir(join(outDir, "plugins")); } catch { return []; }
   const out: PluginState[] = [];
+  const repos = await readRepos(outDir);
   for (const id of ids.filter(isValidPluginId).sort()) {
     const pdir = join(outDir, "plugins", id);
     const entries: [VersionEntry, boolean][] = [...(await readPublished(pdir)).map((v) => [v, false] as [VersionEntry, boolean]), ...(await readStaged(pdir)).map((v) => [v, true] as [VersionEntry, boolean])];
@@ -53,7 +65,7 @@ export async function registryState(outDir: string, publicKey: string): Promise<
       }
       versions.push({ version: v.version, published: v.published, staged, review, approval });
     }
-    out.push({ id, versions });
+    out.push({ id, repo: repos[id] ?? "", versions });
   }
   return out;
 }

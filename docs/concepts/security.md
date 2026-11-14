@@ -110,7 +110,9 @@ Reviews are produced by Claude Code and by deterministic checks. Treat them as *
 8. **The optional admin web service has no approve/sign capability.** It can trigger sync and review and show status,
    behind mTLS and/or password login (see [Admin service](../admin.md)). A compromised admin login cannot sign an
    approval, but note that mounting `review.signingKeyPath` into it lets it sign review records, which clients using
-   `requireReviewPass` trust. Sessions are in memory, and every allowed admin has the same rights.
+   `requireReviewPass` trust. Sessions are in memory, and every allowed admin has the same rights. Admins can withdraw, hold back
+   or release versions and revoke approvals (all of which only tighten what clients see or restore what policy already allows), and
+   leave shared triage notes. Withdrawing does not uninstall copies already on clients; a signed revocation list would be needed for that.
    In the container deployment the model call runs in a separate reviewer container that holds the Anthropic key and sees
    no registry files; the admin validates what it returns exactly like any model output, so a compromised or confused
    reviewer can cause an `error` verdict (or wasted spend) but cannot produce a pass, write into the registry, or reach the

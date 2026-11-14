@@ -14,6 +14,7 @@ import { SessionStore } from "../src/auth/session";
 import { mtlsAuthenticator } from "../src/auth/mtls";
 import { validateConfig } from "../src/config";
 import { APP_JS } from "../src/ui";
+import { NoteStore } from "../src/notes";
 
 const PASSWORD = "correct horse battery";
 const manifest = (v: string) => JSON.stringify({ id: "demo", name: "Demo", version: v, minAppVersion: "1.5.0", description: "d", author: "a" });
@@ -204,6 +205,73 @@ describe("admin actions", () => {
     await s.waitJob(j.data.job.id, cookie);
     const bodies = [(await s.call("/api/plugins", { cookie })).text, (await s.call("/api/jobs", { cookie })).text, (await s.call(`/api/jobs/${j.data.job.id}`, { cookie })).text, await readFile(s.audit, "utf8")];
     for (const b of bodies) { expect(b).not.toContain("ghp_SECRET"); expect(b).not.toContain("PRIVATE KEY"); expect(b).not.toContain(PASSWORD); }
+  });
+});
+
+describe("withdraw, release and triage notes", () => {
+  it("withdraw runs as an audited job, removes the approval and holds the version back", async () => {
+    const s = await start();
+    const cookie = await s.login();
+    await s.waitJob((await s.call("/api/sync", { cookie, method: "POST" })).data.job.id, cookie);
+    await approveVersion(s.outDir, "demo", "1.0.0", s.keys.privatePem, "tester", "test");
+    let v = (await s.call("/api/plugins", { cookie })).data.plugins[0];
+    expect(v.repo).toBe("o/r");
+    expect(v.versions[0].approval.ok).toBe(true);
+
+    const r = await s.call("/api/manage", { cookie, body: { action: "withdraw", id: "demo", version: "1.0.0" } });
+    expect(r.status).toBe(202);
+    const job = await s.waitJob(r.data.job.id, cookie);
+    expect(job.status).toBe("done");
+    expect(job.output.join(" ")).toMatch(/approval removed, held back/);
+    v = (await s.call("/api/plugins", { cookie })).data.plugins[0];
+    expect(v.versions[0]).toMatchObject({ staged: true, approval: null });
+    expect(await readFile(s.audit, "utf8")).toMatch(/"action":"manage.withdraw"/);
+
+    const rel = await s.call("/api/manage", { cookie, body: { action: "release", id: "demo", version: "1.0.0" } });
+    expect((await s.waitJob(rel.data.job.id, cookie)).status).toBe("done");
+    expect((await s.call("/api/plugins", { cookie })).data.plugins[0].versions[0].staged).toBe(false);
+  });
+
+  it("manage needs a login, the custom header, and valid input", async () => {
+    const s = await start();
+    expect((await s.call("/api/manage", { method: "POST", body: { action: "hold", id: "demo", version: "1.0.0" } })).status).toBe(401);
+    const cookie = await s.login();
+    const noHeader = await fetch(s.base + "/api/manage", { method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: "{}" });
+    expect(noHeader.status).toBe(403);
+    expect((await s.call("/api/manage", { cookie, body: { action: "delete", id: "demo", version: "1.0.0" } })).status).toBe(400);
+    expect((await s.call("/api/manage", { cookie, body: { action: "hold", id: "../x", version: "1.0.0" } })).status).toBe(400);
+    expect(s.deps.jobs.list()).toHaveLength(0);
+  });
+
+  it("a failed manage action shows up as a failed job with the reason", async () => {
+    const s = await start();
+    const cookie = await s.login();
+    const r = await s.call("/api/manage", { cookie, body: { action: "hold", id: "demo", version: "1.0.0" } });
+    const job = await s.waitJob(r.data.job.id, cookie);
+    expect(job.status).toBe("failed");
+    expect(job.error).toMatch(/not in the registry/);
+  });
+
+  it("notes: 404 when disabled; when enabled they are shared, audited without their text, and validated", async () => {
+    const off = await start();
+    expect((await off.call("/api/notes", { cookie: await off.login() })).status).toBe(404);
+
+    const dir = await mkdtemp(join(tmpdir(), "om-notes-"));
+    const s = await start({ notes: new NoteStore(join(dir, "notes.jsonl")) });
+    expect((await s.call("/api/notes")).status).toBe(401);
+    const cookie = await s.login();
+    const created = await s.call("/api/notes", { cookie, body: { plugin: "demo", version: "1.0.0", text: "waiting on the maintainer, private detail XYZ", ref: "SEC-9" } });
+    expect(created.status).toBe(201);
+    const list = await s.call("/api/notes", { cookie });
+    expect(list.data.notes).toHaveLength(1);
+    expect(list.data.notes[0]).toMatchObject({ plugin: "demo", version: "1.0.0", by: "alice", ref: "SEC-9" });
+    const audit = await readFile(s.audit, "utf8");
+    expect(audit).toMatch(/"action":"note.add"/);
+    expect(audit).not.toContain("XYZ");
+    expect((await s.call("/api/notes", { cookie, body: { plugin: "demo", version: "1.0.0", text: "" } })).status).toBe(400);
+    expect((await s.call("/api/notes", { cookie, body: { plugin: "../x", version: "1.0.0", text: "hi" } })).status).toBe(400);
+    const noHeader = await fetch(s.base + "/api/notes", { method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: "{}" });
+    expect(noHeader.status).toBe(403);
   });
 });
 

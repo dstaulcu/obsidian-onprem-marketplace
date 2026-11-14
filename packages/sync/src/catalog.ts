@@ -32,7 +32,7 @@ export async function addEntry(pdir: string, entry: VersionEntry, policy: Publis
   await writeFile(file, JSON.stringify(list, null, 2));
 }
 
-async function qualifies(vdir: string, e: VersionEntry, policy: PublishPolicy): Promise<boolean> {
+export async function qualifies(vdir: string, e: VersionEntry, policy: PublishPolicy): Promise<boolean> {
   const same = (h: { main: string; manifest: string; styles: string }) =>
     h.main === e.sha256.main && h.manifest === e.sha256.manifest && h.styles === e.sha256.styles;
   try {

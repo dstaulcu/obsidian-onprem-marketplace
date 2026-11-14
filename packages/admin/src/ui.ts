@@ -61,6 +61,18 @@ export const INDEX_HTML = `<!doctype html>
     </div>
   </section>
 </main>
+<aside id="drawer" class="drawer" hidden aria-label="Notes">
+  <header><h3 id="drawertitle">Notes</h3><button id="drawerclose" class="btn ghost" type="button">Close</button></header>
+  <div id="notelist" class="notelist"></div>
+  <form id="noteform">
+    <label for="n-text">Add a note (all admins can read it)</label>
+    <textarea id="n-text" maxlength="2000" rows="4" required></textarea>
+    <label for="n-ref">Reference (optional, for example a ticket number)</label>
+    <input id="n-ref" maxlength="100">
+    <button class="btn primary" type="submit">Add note</button> <span id="noteerr" class="err" role="alert"></span>
+    <p class="muted small">Plain text. Notes are for people: they never change what clients can install.</p>
+  </form>
+</aside>
 <script src="/app.js"></script></body></html>`;
 
 export const APP_CSS = `:root{
@@ -155,6 +167,14 @@ h2.section{margin:1.25rem 0 .6rem;font-size:1rem}
 .out{background:var(--code-bg);color:var(--code-text);padding:.9rem 1rem;border-radius:10px;overflow:auto;max-height:24rem;margin:0;font:12.5px/1.5 ui-monospace,SFMono-Regular,Consolas,Menlo,monospace;white-space:pre-wrap}
 .out:empty::before{content:"Select a job to see its output.";color:#7d8798}
 
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(400px,100%);background:var(--surface);border-left:1px solid var(--border);box-shadow:-4px 0 18px rgba(0,0,0,.18);z-index:20;overflow:auto;padding:1rem}
+.drawer>header{display:flex;align-items:center;gap:.6rem;margin-bottom:.8rem}.drawer>header h3{flex:1;overflow-wrap:anywhere}
+.drawer label{display:block;margin:.8rem 0 .25rem;font-weight:600;font-size:13px}
+textarea{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.5rem .65rem;width:100%;resize:vertical}
+.notelist{display:flex;flex-direction:column;gap:.6rem}
+.note{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:.55rem .75rem}
+.notemeta{color:var(--muted);font-size:12px;margin-bottom:.2rem}.notetext{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.btn.danger{border-color:var(--bad);color:var(--bad)}.issuelink{font-size:12px;color:var(--accent)}
 @media (max-width:640px){main{padding:.75rem}.top{padding:.6rem .75rem}td,th{padding:.5rem .6rem}}`;
 
 export const APP_JS = `(() => {
@@ -188,7 +208,7 @@ function applyFilter(input, root, selector) {
 }
 
 // ---- state shared between panels and the summary cards
-const S = { plugins: [], clients: null, activity: null, jobs: [], selectedJob: null, registryUrl: "" };
+const S = { plugins: [], clients: null, activity: null, jobs: [], selectedJob: null, registryUrl: "", githubWebBase: "", notesOn: false, notes: [], drawer: null };
 let polling = null, activeTab = "plugins", jobRunning = false;
 
 function say(text, kind) { const b = $("banner"); if (!text) { b.hidden = true; return; } b.textContent = text; b.className = "banner" + (kind ? " " + kind : ""); b.hidden = false; }
@@ -234,6 +254,62 @@ function reportLink(id, version) {
   const a = h("a", "reportlink", "Report"); a.href = base + "/plugins/" + id + "/" + version + "/review.html"; a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = "Open the full review report (findings and what was checked)";
   return a;
 }
+// A button that needs a second click within a few seconds, so a stray click cannot withdraw a version (no browser dialogs).
+function confirmButton(label, ask, fn, danger) {
+  const b = h("button", "btn tiny rowbtn" + (danger ? " danger" : ""), label); b.type = "button"; b.disabled = jobRunning; let timer = null;
+  b.onclick = () => {
+    if (timer) { clearTimeout(timer); timer = null; b.textContent = label; fn(); return; }
+    b.textContent = ask + " Click again"; timer = setTimeout(() => { timer = null; b.textContent = label; }, 4000);
+  };
+  b.title = label === "Release" ? "Publish this held-back version to clients (the publish policy still applies)" : "Remove the approval and hide this version from clients. Copies already installed stay installed.";
+  return b;
+}
+async function manage(action, id, version) {
+  say("");
+  const r = await api("/api/manage", { action, id, version });
+  if (r.status !== 202) { say((r.data && r.data.error) || "Failed (" + r.status + ")", "bad"); return; }
+  S.selectedJob = r.data.job.id; await showJobs(r.data.job.id);
+  for (let i = 0; i < 60; i++) {
+    const j = await api("/api/jobs/" + r.data.job.id);
+    if (j.data && j.data.status !== "running") { say(j.data.status === "done" ? (j.data.output[0] || "Done.") : (j.data.error || "Failed."), j.data.status === "done" ? "ok" : "bad"); break; }
+    await new Promise((x) => setTimeout(x, 400));
+  }
+  await showPlugins(); await showJobs(); renderCards();
+}
+
+// "Report an issue": opens the repository's new-issue page with a short prefilled text. The person reviews and posts it under
+// their own GitHub identity; nothing is sent from here and no token is involved. The text holds only the verdict and a link to
+// the report, never model output (which is derived from untrusted code). The repository comes from index.json but is shape-checked
+// by the server, and the address is built here from the configured GitHub web address.
+const REPO_OK = /^[A-Za-z0-9_.-]+[/][A-Za-z0-9_.-]+$/;
+function issueLink(p, v) {
+  const verdict = v.review && ["findings", "fail"].includes(v.review.verdict) ? v.review.verdict : null;
+  const base = S.githubWebBase; if (!verdict || !p.repo || !REPO_OK.test(p.repo) || !(base.startsWith("http://") || base.startsWith("https://")) || !SAFE_ID.test(p.id) || !SAFE_VER.test(v.version)) return null;
+  const rep = S.registryUrl && (S.registryUrl.startsWith("http://") || S.registryUrl.startsWith("https://")) ? S.registryUrl.replace(/[/]+$/, "") + "/plugins/" + p.id + "/" + v.version + "/review.html" : "";
+  const title = "Security review of " + p.id + " " + v.version + ": " + verdict;
+  const NL = String.fromCharCode(10);
+  const body = "An automated security review of " + p.id + "@" + v.version + " came back with: " + verdict + "." + NL + NL + (rep ? "Full report: " + rep + NL + NL : "") +
+    "Please look at the findings and let us know if they are expected or will be addressed." + NL + NL + "(Opened from the registry admin; edit this text before posting.)";
+  const a = h("a", "issuelink", "Report issue"); a.href = base.replace(/[/]+$/, "") + "/" + p.repo + "/issues/new?title=" + encodeURIComponent(title) + "&body=" + encodeURIComponent(body);
+  a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = "Open a prefilled issue on " + p.repo + " (you review and post it yourself)";
+  return a;
+}
+
+// ---- notes drawer
+const notesFor = (id, version) => S.notes.filter((n) => n.plugin === id && n.version === version);
+function noteButton(id, version) {
+  const n = notesFor(id, version).length; const b = h("button", "btn tiny", n ? "Notes (" + n + ")" : "Notes"); b.type = "button"; b.title = "Triage notes for " + id + "@" + version;
+  b.onclick = () => openDrawer(id, version); return b;
+}
+function renderDrawer() {
+  if (!S.drawer) return; const { id, version } = S.drawer; $("drawertitle").textContent = "Notes: " + id + "@" + version;
+  const box = $("notelist"); box.replaceChildren(); const list = notesFor(id, version);
+  if (!list.length) box.append(h("p", "muted", "No notes yet."));
+  for (const n of list) box.append(h("div", "note", h("div", "notemeta", n.by + ", " + rel(n.at) + (n.ref ? ", ref: " + n.ref : "")), h("p", "notetext", n.text)));
+}
+function openDrawer(id, version) { S.drawer = { id, version }; renderDrawer(); $("drawer").hidden = false; $("noteerr").textContent = ""; $("n-text").focus(); }
+function closeDrawer() { S.drawer = null; $("drawer").hidden = true; }
+
 function copyButton(text) {
   const b = h("button", "btn tiny", "Copy approve command"); b.type = "button"; b.title = text;
   b.onclick = async () => { try { await navigator.clipboard.writeText(text); b.textContent = "Copied"; } catch { b.textContent = "Copy failed (see tooltip)"; } setTimeout(() => { b.textContent = "Copy approve command"; }, 2200); };
@@ -246,7 +322,8 @@ function reviewButton(id, version, verdict) {
   return b;
 }
 async function showPlugins() {
-  const { data } = await api("/api/plugins"); S.plugins = (data && data.plugins) || []; S.registryUrl = (data && typeof data.registryUrl === "string") ? data.registryUrl : ""; const box = $("plugins"); box.replaceChildren();
+  const { data } = await api("/api/plugins"); S.plugins = (data && data.plugins) || []; S.registryUrl = (data && typeof data.registryUrl === "string") ? data.registryUrl : ""; S.githubWebBase = (data && typeof data.githubWebBase === "string") ? data.githubWebBase : "";
+  S.notesOn = !!(data && data.notes); if (S.notesOn) { const n = await api("/api/notes"); S.notes = (n.data && n.data.notes) || []; } const box = $("plugins"); box.replaceChildren();
   if (!S.plugins.length) box.append(empty("Nothing mirrored yet", "Click Sync now to pull releases from the configured repositories."));
   for (const p of S.plugins) {
     const g = h("section", "group"); g.dataset.q = p.id.toLowerCase() + " " + p.versions.map((v) => v.version).join(" ");
@@ -255,6 +332,9 @@ async function showPlugins() {
       const ok = v.approval && v.approval.ok;
       const cmd = SAFE_ID.test(p.id) && SAFE_VER.test(v.version) ? "node packages/sync/dist/cli.js approve " + p.id + "@" + v.version + " --key keys/signing-key.pem --registry registry-data --override 'reason'" : null;
       const acts = h("span", "rowacts"); acts.append(reviewButton(p.id, v.version, v.review ? v.review.verdict : null)); if (!ok && cmd) acts.append(copyButton(cmd));
+      acts.append(v.staged ? confirmButton("Release", "Publish to clients?", () => manage("release", p.id, v.version)) : confirmButton("Withdraw", "Withdraw from clients?", () => manage("withdraw", p.id, v.version), true));
+      const iss = v.review ? issueLink(p, v) : null; if (iss) acts.append(iss);
+      if (S.notesOn) acts.append(noteButton(p.id, v.version));
       return [h("span", "mono", v.version), v.staged ? badge("Held back", "warn", "Not listed to clients yet") : badge("Published", "info"), h("span", "revcell", reviewBadge(v.review), v.review ? reportLink(p.id, v.version) : null), approvalBadge(v.approval), acts];
     });
     g.append(tbl(["Version", "State", "Review", "Approval", "Actions"], rows)); box.append(g);
@@ -367,6 +447,12 @@ $("loginform").onsubmit = async (e) => { e.preventDefault(); const f = new FormD
 $("logout").onclick = async () => { await api("/api/logout", {}); location.reload(); };
 $("sync").onclick = () => start("sync"); $("review").onclick = () => start("review"); $("refresh").onclick = () => refreshAll();
 $("q-plugins").oninput = () => applyFilter($("q-plugins"), $("plugins"), ".group"); $("q-clients").oninput = () => applyFilter($("q-clients"), $("clients"), "tbody tr");
+$("drawerclose").onclick = closeDrawer;
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && S.drawer) closeDrawer(); });
+$("noteform").onsubmit = async (e) => { e.preventDefault(); if (!S.drawer) return;
+  const r = await api("/api/notes", { plugin: S.drawer.id, version: S.drawer.version, text: $("n-text").value, ref: $("n-ref").value });
+  if (r.status === 201) { $("n-text").value = ""; $("n-ref").value = ""; $("noteerr").textContent = ""; const n = await api("/api/notes"); S.notes = (n.data && n.data.notes) || []; renderDrawer(); await showPlugins(); }
+  else $("noteerr").textContent = (r.data && r.data.error) || "Could not save the note."; };
 initTheme();
 init();
 })();`;

@@ -11,6 +11,8 @@ export interface AdminConfig {
   /** registry.config.json used by the sync and review jobs. */
   registryConfig: string;
   publicKeyFile?: string;
+  /** Web address of the GitHub server, used to build "report an issue" links. Default: derived from the sync config's githubApiBase. */
+  githubWebBase?: string;
   /** Public URL of the static registry, used for report links in the UI. */
   registryUrl?: string;
   mtls?: { allow: string[] };
@@ -50,6 +52,7 @@ export function validateConfig(c: AdminConfig): string[] {
   if (c.mtls && !c.mtls.allow?.length) e.push("mtls.allow is empty: no certificate would be authorised");
   if (c.password && !c.password.usersFile) e.push("password.usersFile is required");
   for (const n of c.networks ?? []) if (!validNetwork(n)) e.push(`networks: bad entry ${JSON.stringify(n)} (need an IPv4 "a.b.c.d/len" and a name)`);
+  if (c.githubWebBase !== undefined && !/^https?:[/][/][^/ ]+$/.test(c.githubWebBase)) e.push("githubWebBase must look like https://github.example.internal (no path)");
   if (c.reviewQueue !== undefined && (typeof c.reviewQueue !== "string" || !c.reviewQueue)) e.push("reviewQueue must be a directory path");
   if (c.stats?.publish && !c.accessLog) e.push("stats.publish needs accessLog");
   if (c.stats) {
