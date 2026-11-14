@@ -24,6 +24,7 @@
     "lockoutMinutes": 15
   },
   "reviewQueue": "/queue",
+  "signerQueue": "/signq",
   "auditLog": "/audit/admin-audit.jsonl",
   "accessLog": "/logs/access.log",
   "networks": [

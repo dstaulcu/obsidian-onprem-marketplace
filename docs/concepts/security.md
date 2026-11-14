@@ -107,9 +107,11 @@ Reviews are produced by Claude Code and by deterministic checks. Treat them as *
    host. `*.pem`, `*.key`, `keys/` and `signing-key*` are gitignored. Clients hold only the public key.
 7. **Rate limits are handled safely.** Sync stops the run with a clear message instead of retrying; nothing partial
    is marked complete (`manifest.json` is written last).
-8. **The optional admin web service has no approve/sign capability.** It can trigger sync and review and show status,
-   behind mTLS and/or password login (see [Admin service](../admin.md)). A compromised admin login cannot sign an
-   approval, but note that mounting `review.signingKeyPath` into it lets it sign review records, which clients using
+8. **The optional admin web service never holds the signing key.** It can trigger sync and review and show status,
+   behind mTLS and/or password login (see [Admin service](../admin.md)). Approving from the dashboard goes to a separate signer
+   container (no network, read-only registry, its own log) that re-checks the files and the review, and the admin verifies the answer
+   with the public key before using it; a compromised admin login can ask for approvals the signer's checks allow, but cannot sign or
+   forge one. Note also that mounting `review.signingKeyPath` into it lets it sign review records, which clients using
    `requireReviewPass` trust. Sessions are in memory, and every allowed admin has the same rights. Admins can withdraw, hold back
    or release versions and revoke approvals (all of which only tighten what clients see or restore what policy already allows), and
    leave shared triage notes. Withdrawing does not uninstall copies already on clients; a signed revocation list would be needed for that.

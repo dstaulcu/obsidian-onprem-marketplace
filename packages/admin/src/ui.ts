@@ -174,7 +174,7 @@ textarea{font:inherit;color:var(--text);background:var(--surface);border:1px sol
 .notelist{display:flex;flex-direction:column;gap:.6rem}
 .note{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:.55rem .75rem}
 .notemeta{color:var(--muted);font-size:12px;margin-bottom:.2rem}.notetext{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
-.btn.danger{border-color:var(--bad);color:var(--bad)}.issuelink{font-size:12px;color:var(--accent)}
+.btn.danger{border-color:var(--bad);color:var(--bad)}.reasoninput{width:15rem;padding:.2rem .5rem;font-size:12px}.issuelink{font-size:12px;color:var(--accent)}
 @media (max-width:640px){main{padding:.75rem}.top{padding:.6rem .75rem}td,th{padding:.5rem .6rem}}`;
 
 export const APP_JS = `(() => {
@@ -208,7 +208,7 @@ function applyFilter(input, root, selector) {
 }
 
 // ---- state shared between panels and the summary cards
-const S = { plugins: [], clients: null, activity: null, jobs: [], selectedJob: null, registryUrl: "", githubWebBase: "", notesOn: false, notes: [], drawer: null };
+const S = { plugins: [], clients: null, activity: null, jobs: [], selectedJob: null, registryUrl: "", githubWebBase: "", canApprove: false, notesOn: false, notes: [], drawer: null };
 let polling = null, activeTab = "plugins", jobRunning = false;
 
 function say(text, kind) { const b = $("banner"); if (!text) { b.hidden = true; return; } b.textContent = text; b.className = "banner" + (kind ? " " + kind : ""); b.hidden = false; }
@@ -264,9 +264,26 @@ function confirmButton(label, ask, fn, danger) {
   b.title = label === "Release" ? "Publish this held-back version to clients (the publish policy still applies)" : "Remove the approval and hide this version from clients. Copies already installed stay installed.";
   return b;
 }
-async function manage(action, id, version) {
+// Approve: the signing key is not in this page or in the admin service. The request goes to the signer container, which re-checks the
+// files and the review and signs; the admin verifies the answer before it is used. A review that is not a pass needs a written reason,
+// which is recorded inside the signed approval and in the audit log.
+function approveControl(p, v) {
+  const verdict = v.review ? v.review.verdict : null;
+  if (verdict === "pass") return confirmButton("Approve", "Sign this approval?", () => runJob("/api/approve", { id: p.id, version: v.version }));
+  const wrap = h("span", "rowacts"); const b = h("button", "btn tiny rowbtn", "Approve..."); b.type = "button"; b.disabled = jobRunning;
+  b.title = verdict ? "The review is '" + verdict + "', so a written reason is required" : "There is no review yet, so a written reason is required";
+  b.onclick = () => {
+    const inp = h("input", "reasoninput"); inp.placeholder = "Reason (signed into the approval)"; inp.maxLength = 300; inp.setAttribute("aria-label", "Reason for approving without a passing review");
+    const go = h("button", "btn tiny primary", "Approve anyway"); go.type = "button";
+    go.onclick = () => { const why = inp.value.trim(); if (!why) { inp.focus(); return; } runJob("/api/approve", { id: p.id, version: v.version, override: why }); };
+    wrap.replaceChildren(inp, go); inp.focus();
+  };
+  wrap.append(b); return wrap;
+}
+const manage = (action, id, version) => runJob("/api/manage", { action, id, version });
+async function runJob(path, body) {
   say("");
-  const r = await api("/api/manage", { action, id, version });
+  const r = await api(path, body);
   if (r.status !== 202) { say((r.data && r.data.error) || "Failed (" + r.status + ")", "bad"); return; }
   S.selectedJob = r.data.job.id; await showJobs(r.data.job.id);
   for (let i = 0; i < 60; i++) {
@@ -323,7 +340,7 @@ function reviewButton(id, version, verdict) {
 }
 async function showPlugins() {
   const { data } = await api("/api/plugins"); S.plugins = (data && data.plugins) || []; S.registryUrl = (data && typeof data.registryUrl === "string") ? data.registryUrl : ""; S.githubWebBase = (data && typeof data.githubWebBase === "string") ? data.githubWebBase : "";
-  S.notesOn = !!(data && data.notes); if (S.notesOn) { const n = await api("/api/notes"); S.notes = (n.data && n.data.notes) || []; } const box = $("plugins"); box.replaceChildren();
+  S.canApprove = !!(data && data.canApprove); S.notesOn = !!(data && data.notes); if (S.notesOn) { const n = await api("/api/notes"); S.notes = (n.data && n.data.notes) || []; } const box = $("plugins"); box.replaceChildren();
   if (!S.plugins.length) box.append(empty("Nothing mirrored yet", "Click Sync now to pull releases from the configured repositories."));
   for (const p of S.plugins) {
     const g = h("section", "group"); g.dataset.q = p.id.toLowerCase() + " " + p.versions.map((v) => v.version).join(" ");
@@ -331,7 +348,7 @@ async function showPlugins() {
     const rows = p.versions.map((v) => {
       const ok = v.approval && v.approval.ok;
       const cmd = SAFE_ID.test(p.id) && SAFE_VER.test(v.version) ? "node packages/sync/dist/cli.js approve " + p.id + "@" + v.version + " --key keys/signing-key.pem --registry registry-data --override 'reason'" : null;
-      const acts = h("span", "rowacts"); acts.append(reviewButton(p.id, v.version, v.review ? v.review.verdict : null)); if (!ok && cmd) acts.append(copyButton(cmd));
+      const acts = h("span", "rowacts"); acts.append(reviewButton(p.id, v.version, v.review ? v.review.verdict : null)); if (!ok) { if (S.canApprove) acts.append(approveControl(p, v)); else if (cmd) acts.append(copyButton(cmd)); }
       acts.append(v.staged ? confirmButton("Release", "Publish to clients?", () => manage("release", p.id, v.version)) : confirmButton("Withdraw", "Withdraw from clients?", () => manage("withdraw", p.id, v.version), true));
       const iss = v.review ? issueLink(p, v) : null; if (iss) acts.append(iss);
       if (S.notesOn) acts.append(noteButton(p.id, v.version));

@@ -18,11 +18,12 @@ services:
   init:
     image: busybox:stable
     user: "0"
-    command: ["sh", "-c", "chown ${OM_UID:-10001}:${OM_GID:-10001} /data /audit /queue 2>/dev/null; chmod 755 /data /audit 2>/dev/null; chmod 750 /queue 2>/dev/null; exit 0"]
+    command: ["sh", "-c", "chown ${OM_UID:-10001}:${OM_GID:-10001} /data /audit /queue /signq 2>/dev/null; chmod 755 /data /audit 2>/dev/null; chmod 750 /queue /signq 2>/dev/null; exit 0"]
     volumes:
       - ./registry-data:/data
       - audit:/audit
       - queue:/queue
+      - signq:/signq
     restart: "no"
 
   admin:
@@ -36,6 +37,7 @@ services:
       - ./registry-data:/data
       - audit:/audit
       - queue:/queue
+      - signq:/signq
       - logs:/logs:ro
       - ./config:/config:ro
     environment:
@@ -87,6 +89,36 @@ services:
     logging: *logging
     restart: unless-stopped
 
+  # OPTIONAL (docker compose --profile signer up -d): approve from the dashboard. The ONLY container with the signing key.
+  # It has no network at all, sees the registry read-only, and re-checks the files and the review itself before signing; the admin
+  # verifies what it returns with the public key before writing anything. Every signature and refusal is logged here
+  # (docker compose logs signer), outside the admin's reach. The key comes from your secret store: here a Docker secret read from
+  # ./secrets/signing-key.pem (gitignored); on Kubernetes/Rancher mount a Secret at /run/secrets/signing-key instead.
+  # Also set "signerQueue": "/signq" in config/admin.config.json. Without this service, approve stays on the command line.
+  signer:
+    profiles: ["signer"]
+    build:
+      context: .
+      dockerfile: deploy/signer/Dockerfile
+    user: "${OM_UID:-10001}:${OM_GID:-10001}"
+    network_mode: none
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    volumes:
+      - ./registry-data:/data:ro
+      - signq:/signq
+      - ./config/public-key.txt:/config/public-key.txt:ro
+    secrets:
+      - source: signing-key
+        target: signing-key
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+    restart: unless-stopped
+
   # Rotates the access log and the admin audit log. Retention is set from the environment (or a .env file):
   # OM_ACCESS_LOG_DAYS, OM_AUDIT_LOG_DAYS (default 14 each), OM_LOG_MAX_SIZE (default 50M). See docs/admin.md.
   logrotate:
@@ -108,7 +140,12 @@ services:
     logging: *logging
     restart: unless-stopped
 
+secrets:
+  signing-key:
+    file: ./secrets/signing-key.pem
+
 volumes:
   audit:
   logs:
   queue:
+  signq:

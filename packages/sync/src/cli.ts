@@ -7,6 +7,8 @@ import { loadRubric, renderRubricDoc, testRule } from "./rubric";
 import { allVersions, publishHeld, runReviews, runSync } from "./jobs";
 import { makeReviewer } from "./reviewers";
 import { runWorker, validateReviewQueue } from "./reviewqueue";
+import { loadSigningKey, signerHandler } from "./signer";
+import { runLoop } from "./workqueue";
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -51,6 +53,24 @@ if (cmd === "keygen") {
   else { const [id, version] = (rest[0] ?? "").split("@"); if (!id || !version) { console.error("usage: review <id@version | --all>"); process.exit(2); } targets = [{ id, version }]; }
   await runReviews(cfg, targets);
   await publishHeld(cfg.outDir, cfg.publishPolicy ?? "all");
+} else if (cmd === "sign-worker") {
+  // om-sync sign-worker --queue /signq --registry /data [--key-file /run/secrets/signing-key] [--public-key /config/public-key.txt]
+  // The separate signer container: the only process with the signing key. Answers approval requests from the admin.
+  const flag = (n: string, d?: string) => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : d; };
+  const queue = flag("queue"), registry = flag("registry");
+  if (!queue || !registry) { console.error("usage: sign-worker --queue <dir> --registry <dir> [--key-file f] [--public-key f]"); process.exit(2); }
+  let key;
+  try { key = await loadSigningKey(flag("key-file", process.env.OM_SIGNING_KEY_FILE)); } catch (e) { console.error("sign-worker: " + (e as Error).message); process.exit(2); }
+  // Refuse to run with a key that does not match the public key the admin and the clients verify with: every approval would show as invalid.
+  const pubFile = flag("public-key");
+  if (pubFile) {
+    const pinned = (await readFile(pubFile, "utf8")).trim();
+    if (pinned !== key.publicSpkiB64) { console.error("sign-worker: the signing key does not match the public key in " + pubFile + "; refusing to start"); process.exit(2); }
+  }
+  const stop = { now: false };
+  for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => { stop.now = true; });
+  console.log(`sign-worker: queue ${queue}, registry ${registry} (read-only), public key ${key.publicSpkiB64.slice(0, 16)}...`);
+  await runLoop(queue, signerHandler(registry, key.privatePem, (l) => console.log(l)), stop, (l) => console.log(l));
 } else if (cmd === "review-worker") {
   // om-sync review-worker --queue /queue [--config registry.config.json]
   // The separate reviewer container: answers prompts the admin queues. It holds the model credentials and sees no registry files.

@@ -5,6 +5,11 @@ import { isSafeVersion, isValidPluginId } from "@om/shared";
 import type { Config, Fetcher } from "@om/sync/src/sync";
 import { allVersions, publishHeld, runReviews, runSync, type ReviewOpts } from "@om/sync/src/jobs";
 import { manageVersion, MANAGE_ACTIONS, type ManageAction } from "@om/sync/src/manage";
+import type { QueueSigner } from "@om/sync/src/signer";
+import { findEntry } from "@om/sync/src/catalog";
+import { checkApproval } from "@om/shared";
+import { mkdir, rename, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { NoteError, type NoteStore } from "./notes";
 import type { Audit } from "./audit";
 import type { AdminConfig } from "./config";
@@ -25,6 +30,8 @@ export interface Deps {
   reviewOpts?: ReviewOpts;
   /** Shared triage notes. Unset: the notes API answers 404. */
   notes?: NoteStore;
+  /** Where approvals are signed (the queue to the signer container). Unset: approving stays on the command line. */
+  signer?: QueueSigner;
   publicKey: string;
   audit: Audit;
   authenticators: Authenticator[];
@@ -138,7 +145,7 @@ export function createHandler(d: Deps): RequestListener {
       }
       if (method === "GET" && path === "/api/plugins") {
         const rc = await d.loadRegistryConfig();
-        json(res, 200, { registryUrl: d.cfg.registryUrl ?? null, githubWebBase: githubWebBase(d.cfg.githubWebBase, rc.githubApiBase), publishPolicy: rc.publishPolicy ?? "all", notes: !!d.notes, plugins: await registryState(rc.outDir, d.publicKey) });
+        json(res, 200, { registryUrl: d.cfg.registryUrl ?? null, githubWebBase: githubWebBase(d.cfg.githubWebBase, rc.githubApiBase), publishPolicy: rc.publishPolicy ?? "all", notes: !!d.notes, canApprove: !!d.signer, plugins: await registryState(rc.outDir, d.publicKey) });
         return;
       }
       if (method === "GET" && path === "/api/jobs") {
@@ -178,6 +185,46 @@ export function createHandler(d: Deps): RequestListener {
           await publishHeld(rc.outDir, rc.publishPolicy ?? "all", log);
         });
         await d.audit.record(who.name, "review.start", { job: job.id, targets: body.all === true ? "all" : `${targets[0].id}@${targets[0].version}` }, ip);
+        json(res, 202, { job });
+        return;
+      }
+      if (method === "POST" && path === "/api/approve") {
+        // The signing key is not in this process. The signer container re-checks the files and the review and signs; we verify what
+        // it returns against the public key and the hashes on disk, and only then write it into the registry.
+        if (!d.signer) throw new HttpError(404, "approving from the dashboard is not enabled (no signerQueue in the admin config)");
+        const body = await readJson(req);
+        if (typeof body.id !== "string" || typeof body.version !== "string" || !isValidPluginId(body.id) || !isSafeVersion(body.version)) throw new HttpError(400, "send {id, version, override?}");
+        if (body.override !== undefined && (typeof body.override !== "string" || body.override.length > 300)) throw new HttpError(400, "override must be text of at most 300 characters");
+        if (!d.publicKey) throw new HttpError(503, "no public key is configured to verify the signer's answer");
+        const why = await d.signer.ready();
+        if (why) throw new HttpError(503, why);
+        const rc = await d.loadRegistryConfig();
+        const { id, version } = body as { id: string; version: string };
+        const override = typeof body.override === "string" && body.override.trim() ? body.override.trim() : undefined;
+        const signer = d.signer;
+        const job = d.jobs.start("approve", who.name, async (log) => {
+          try {
+            const r = await signer.sign({ id, version, by: who.name, ...(override ? { override } : {}) });
+            const pdir = join(rc.outDir, "plugins", id);
+            const entry = await findEntry(pdir, version);
+            if (!entry) throw new Error(`${id}@${version} is not in the registry`);
+            const bytes = new Uint8Array(Buffer.from(r.approval, "utf8"));
+            const chk = await checkApproval(bytes, r.sig.trim(), d.publicKey, { id, version, actual: entry.sha256 });
+            if (!chk.ok) throw new Error("the signer's approval did not verify: " + chk.reason);
+            if (chk.approval.approvedBy !== who.name) throw new Error("the signer's approval names a different approver");
+            const vdir = join(pdir, version);
+            await mkdir(vdir, { recursive: true });
+            await writeFile(join(vdir, "approval.json.tmp"), bytes); await rename(join(vdir, "approval.json.tmp"), join(vdir, "approval.json"));
+            await writeFile(join(vdir, "approval.json.sig.tmp"), r.sig.trim()); await rename(join(vdir, "approval.json.sig.tmp"), join(vdir, "approval.json.sig"));
+            log.log(`approved ${id}@${version} by ${who.name} (review: ${chk.approval.reviewVerdict ?? "none"}${chk.approval.override ? `, override: ${chk.approval.override}` : ""})`);
+            await d.audit.record(who.name, "approve", { job: job.id, target: id + "@" + version, reviewVerdict: chk.approval.reviewVerdict ?? "none", ...(chk.approval.override ? { override: chk.approval.override } : {}) }, ip);
+            await publishHeld(rc.outDir, rc.publishPolicy ?? "all", log);
+          } catch (e) {
+            await d.audit.record(who.name, "approve.failed", { job: job.id, target: id + "@" + version, reason: (e as Error).message.slice(0, 200) }, ip);
+            throw e;
+          }
+        });
+        await d.audit.record(who.name, "approve.start", { job: job.id, target: id + "@" + version, ...(override ? { override } : {}) }, ip);
         json(res, 202, { job });
         return;
       }

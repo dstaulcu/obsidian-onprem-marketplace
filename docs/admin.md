@@ -8,8 +8,9 @@
 > a browser. Expect rough edges and do not expose it beyond a test network yet.
 
 A small web interface for the registry admin: see what is mirrored, staged, reviewed and approved, and trigger **sync**
-and **review**. It does not approve or sign anything: `approve` stays on the CLI, so the signing key never has to
-live in the container (see [Security](#security-model)).
+and **review**, withdraw or release versions, and (optionally) **approve**. The admin process never holds the signing key: approving
+is done by a separate [signer container](#approving-from-the-dashboard-the-signer), or on the CLI where the key lives (see
+[Security](#security-model)).
 
 It is one dependency-free Node process (`packages/admin`, `om-admin`) beside the static registry. There is no external
 identity provider; login is **client certificates (mTLS)**, **local passwords**, or both.
@@ -63,7 +64,7 @@ TLS is mandatory; the service refuses to start without it unless `allowInsecureH
 ## What it can do
 
 `GET /api/plugins` (versions, review verdict, approval state), `POST /api/sync`, `POST /api/review`
-(`{"all":true}` or `{"id","version"}`, plus `"force":true` to redo a single version), `POST /api/manage`, `GET|POST /api/notes`, `GET /api/jobs[/<id>]`. One job runs at a time (a second request gets 409).
+(`{"all":true}` or `{"id","version"}`, plus `"force":true` to redo a single version), `POST /api/approve` (only with a signer), `POST /api/manage`, `GET|POST /api/notes`, `GET /api/jobs[/<id>]`. One job runs at a time (a second request gets 409).
 Approvals and signed reviews are verified with the **public** key; an approval made with another key shows as invalid.
 For anything unapproved the page shows the CLI command to run on the admin host.
 
@@ -104,6 +105,34 @@ one JSON object per line, never in the served registry. They are for people: the
 is meant to be easy to consume elsewhere (`GET /api/notes`, or read the file), and each note produces a `note.add` audit event (ids only,
 not the text), so a log shipper or ticketing integration can react to it. There are deliberately no statuses or assignees; a ticketing
 system is better at that.
+
+## Approving from the dashboard (the signer)
+
+An approval is a signature that tells every client "install this", so the key that makes it never enters the admin process. Approving
+from the dashboard uses a third small container, `signer`, which is optional (`docker compose --profile signer up -d`):
+
+| Step | Who | What |
+| --- | --- | --- |
+| 1 | admin | An admin clicks **Approve** (a version with a passing review needs a second click; anything else needs a written reason). The admin queues `{id, version, by, reason}` in the `signq` volume. |
+| 2 | signer | Re-reads the plugin files from the registry (read-only) and recomputes their hashes. Refuses unless a review matching those exact files passed, or a reason was given (recorded inside the signed approval). Rate limited to 30 a minute. Signs. Logs the decision. |
+| 3 | admin | Verifies the signature with the PUBLIC key, checks it covers exactly the hashes on disk and names the logged-in admin, then writes `approval.json` and its signature into the registry. A bad answer is a failed job and writes nothing. |
+
+The signer has **no network at all** (`network_mode: none`), no ports, a read-only root and a read-only registry. It cannot be asked to
+sign arbitrary bytes, only an approval for a version that is in the registry. It refuses to start if its key does not match
+`public-key.txt`. Every signature and refusal is written to the signer's own log (`docker compose logs signer`), where a compromised
+admin cannot erase it; the admin also writes `approve.start`, `approve` (with the review verdict and any reason) and `approve.failed`
+to its audit log, which Splunk forwards.
+
+Setup: put the signing key in your secret store. In Compose it is a file secret read from `secrets/signing-key.pem` (gitignored); on
+Kubernetes or Rancher mount a Secret at `/run/secrets/signing-key`, or set `OM_SIGNING_KEY` to the PEM. Make the file readable by the
+container user (on Linux set `OM_UID`/`OM_GID` to its owner). Then add `"signerQueue": "/signq"` and a `publicKeyFile` to
+`config/admin.config.json` and start with `--profile signer`. If the signer is down, **Approve** fails immediately with a clear message
+and the CLI still works. Single-admin approval is the default; the admin's identity is whoever is logged in.
+
+**What this does and does not protect.** A stolen admin login can no longer sign anything itself, but it can ask the signer to approve a
+version that is in the registry and has a passing review (or any version, with a written reason). The audit trail and the signer's own log
+are what make that visible. The signer trusts the `review.json` it finds in the registry, which the admin writes; if you need the review
+itself to be tamper-evident, sign reviews (`review.signingKeyPath`) and treat that as a separate decision.
 
 ## Reviews in a separate container
 
@@ -227,10 +256,12 @@ Event fields (`schema: 1`; names are a contract, new fields may be added but exi
 
 - **Separate listener.** Clients read the registry from a static, read-only server. The admin listens elsewhere; the
   registry volume is writable only by the admin container.
-- **No signing in the UI.** Compromising an admin login lets an attacker trigger syncs and reviews and read status, but
-  not sign approvals. Approvals still need the private key and a human on the CLI. Reviews are only signed if you
-  mount a key (`review.signingKeyPath`); a signed review is not an approval, but clients using `requireReviewPass`
-  trust one, so mounting the key widens what a compromised admin can do.
+- **No signing key in the admin.** Compromising an admin login lets an attacker trigger syncs and reviews, withdraw versions and read
+  status, but not sign approvals itself: signing happens in the separate signer container (see above), which re-checks the files and the
+  review, and its answer is verified before use. A stolen login can still ask the signer to approve something that passes its checks, so
+  watch the audit log and the signer's own log. Reviews are only signed if you mount a key (`review.signingKeyPath`); a signed review is
+  not an approval, but clients using `requireReviewPass` trust one, so mounting that key into the admin widens what a compromised admin
+  can do.
 - **CSRF.** Browsers attach cookies and client certificates to cross-site requests, so every POST must carry
   `X-OM-Admin: 1` (forcing a CORS preflight that is never approved) and any `Origin` must match the host.
 - **Untrusted data.** Plugin ids, versions and findings come from third-party repos. The UI renders them with

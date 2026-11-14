@@ -37,6 +37,12 @@ export interface AdminConfig {
    * validated here exactly like a local one. Leave unset to review in-process (needs the provider's credentials here).
    */
   reviewQueue?: string;
+  /**
+   * Directory shared with the separate signer container (see docs/admin.md). When set, the dashboard can approve versions: the
+   * signing key never enters this process; the signer signs, and this service verifies the answer with the public key before
+   * writing it into the registry. Needs publicKeyFile. Leave unset to keep approving on the command line.
+   */
+  signerQueue?: string;
   /** Stream events to Splunk HEC. The token comes from an env var or file, never from this config. */
   splunk?: SplunkConfig;
 }
@@ -53,6 +59,8 @@ export function validateConfig(c: AdminConfig): string[] {
   if (c.password && !c.password.usersFile) e.push("password.usersFile is required");
   for (const n of c.networks ?? []) if (!validNetwork(n)) e.push(`networks: bad entry ${JSON.stringify(n)} (need an IPv4 "a.b.c.d/len" and a name)`);
   if (c.githubWebBase !== undefined && !/^https?:[/][/][^/ ]+$/.test(c.githubWebBase)) e.push("githubWebBase must look like https://github.example.internal (no path)");
+  if (c.signerQueue !== undefined && (typeof c.signerQueue !== "string" || !c.signerQueue)) e.push("signerQueue must be a directory path");
+  if (c.signerQueue && !c.publicKeyFile) e.push("signerQueue needs publicKeyFile: approvals returned by the signer are verified with it before they are used");
   if (c.reviewQueue !== undefined && (typeof c.reviewQueue !== "string" || !c.reviewQueue)) e.push("reviewQueue must be a directory path");
   if (c.stats?.publish && !c.accessLog) e.push("stats.publish needs accessLog");
   if (c.stats) {

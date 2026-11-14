@@ -15,6 +15,10 @@ import { mtlsAuthenticator } from "../src/auth/mtls";
 import { validateConfig } from "../src/config";
 import { APP_JS } from "../src/ui";
 import { NoteStore } from "../src/notes";
+import { queueSigner } from "../../sync/src/signer";
+import { processQueue, touchHeartbeat } from "../../sync/src/workqueue";
+import { buildApproval } from "../../sync/src/signing";
+import { signerHandler } from "../../sync/src/signer";
 
 const PASSWORD = "correct horse battery";
 const manifest = (v: string) => JSON.stringify({ id: "demo", name: "Demo", version: v, minAppVersion: "1.5.0", description: "d", author: "a" });
@@ -272,6 +276,85 @@ describe("withdraw, release and triage notes", () => {
     expect((await s.call("/api/notes", { cookie, body: { plugin: "../x", version: "1.0.0", text: "hi" } })).status).toBe(400);
     const noHeader = await fetch(s.base + "/api/notes", { method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: "{}" });
     expect(noHeader.status).toBe(403);
+  });
+});
+
+/** Runs a signer worker loop on a temp queue with the given request handler, like the signer container does. */
+async function withSigner(s: Awaited<ReturnType<typeof start>>, handle: (req: Record<string, unknown>) => Promise<Record<string, unknown>>) {
+  const queue = await mkdtemp(join(tmpdir(), "om-signq-"));
+  await touchHeartbeat(queue);
+  s.deps.signer = queueSigner(queue, { pollMs: 20 });
+  let stop = false;
+  const loop = (async () => { while (!stop) { await processQueue(queue, handle); await new Promise((r) => setTimeout(r, 20)); } })();
+  return async () => { stop = true; await loop; };
+}
+const honest = (s: Awaited<ReturnType<typeof start>>) => signerHandler(s.outDir, s.keys.privatePem, () => {});
+
+describe("approving through the signer", () => {
+  it("signs through the queue, verifies the answer, writes the approval and audits it with the reason", async () => {
+    const s = await start();
+    const cookie = await s.login();
+    await s.waitJob((await s.call("/api/sync", { cookie, method: "POST" })).data.job.id, cookie);
+    const stop = await withSigner(s, honest(s));
+    expect((await s.call("/api/plugins", { cookie })).data.canApprove).toBe(true);
+    const r = await s.call("/api/approve", { cookie, body: { id: "demo", version: "1.0.0", override: "checked with the vendor" } });
+    expect(r.status).toBe(202);
+    const job = await s.waitJob(r.data.job.id, cookie);
+    expect(job.status).toBe("done");
+    expect(job.output.join(" ")).toMatch(/approved demo@1.0.0 by alice/);
+    const v = (await s.call("/api/plugins", { cookie })).data.plugins[0].versions[0];
+    expect(v.approval).toMatchObject({ ok: true, by: "alice", override: "checked with the vendor" });
+    const audit = await readFile(s.audit, "utf8");
+    expect(audit).toMatch(/"action":"approve.start"/);
+    expect(audit).toMatch(/"action":"approve","[^\n]*"target":"demo@1.0.0"[^\n]*"override":"checked with the vendor"/);
+    await stop();
+  });
+
+  it("refuses a signer that signs with the wrong key, and writes nothing", async () => {
+    const s = await start();
+    const cookie = await s.login();
+    await s.waitJob((await s.call("/api/sync", { cookie, method: "POST" })).data.job.id, cookie);
+    const wrong = generateKeys();
+    const stop = await withSigner(s, signerHandler(s.outDir, wrong.privatePem, () => {}));
+    const job = await s.waitJob((await s.call("/api/approve", { cookie, body: { id: "demo", version: "1.0.0", override: "x" } })).data.job.id, cookie);
+    expect(job.status).toBe("failed");
+    expect(job.error).toMatch(/did not verify/);
+    expect((await s.call("/api/plugins", { cookie })).data.plugins[0].versions[0].approval).toBeNull();
+    expect(await readFile(s.audit, "utf8")).toMatch(/"action":"approve.failed"/);
+    await stop();
+  });
+
+  it("refuses an approval that names a different approver than the logged-in admin", async () => {
+    const s = await start();
+    const cookie = await s.login();
+    await s.waitJob((await s.call("/api/sync", { cookie, method: "POST" })).data.job.id, cookie);
+    const stop = await withSigner(s, async (req) => {
+      const b = await buildApproval(s.outDir, String(req.id), String(req.version), s.keys.privatePem, "mallory", "x");
+      return { approval: b.bytes.toString("utf8"), sig: b.sig };
+    });
+    const job = await s.waitJob((await s.call("/api/approve", { cookie, body: { id: "demo", version: "1.0.0", override: "x" } })).data.job.id, cookie);
+    expect(job.status).toBe("failed");
+    expect(job.error).toMatch(/different approver/);
+    expect((await s.call("/api/plugins", { cookie })).data.plugins[0].versions[0].approval).toBeNull();
+    await stop();
+  });
+
+  it("is off without a signer, fails fast with the signer down, and validates input", async () => {
+    const s = await start();
+    const cookie = await s.login();
+    await s.waitJob((await s.call("/api/sync", { cookie, method: "POST" })).data.job.id, cookie);
+    expect((await s.call("/api/plugins", { cookie })).data.canApprove).toBe(false);
+    expect((await s.call("/api/approve", { cookie, body: { id: "demo", version: "1.0.0" } })).status).toBe(404);
+    s.deps.signer = queueSigner(await mkdtemp(join(tmpdir(), "om-signq-")), { staleMs: 1000 });
+    const down = await s.call("/api/approve", { cookie, body: { id: "demo", version: "1.0.0", override: "x" } });
+    expect(down.status).toBe(503);
+    expect(down.data.error).toMatch(/signer container is not running/);
+    expect((await s.call("/api/approve", { cookie, body: { id: "../x", version: "1.0.0" } })).status).toBe(400);
+    expect((await s.call("/api/approve", { cookie, body: { id: "demo", version: "1.0.0", override: "y".repeat(301) } })).status).toBe(400);
+    expect((await s.call("/api/approve", { method: "POST", body: { id: "demo", version: "1.0.0" } })).status).toBe(401);
+    const noHeader = await fetch(s.base + "/api/approve", { method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: "{}" });
+    expect(noHeader.status).toBe(403);
+    expect(s.deps.jobs.list().filter((j) => j.kind === "approve")).toHaveLength(0);
   });
 });
 

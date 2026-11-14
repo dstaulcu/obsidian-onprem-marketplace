@@ -9,6 +9,7 @@ import { SessionStore } from "./auth/session";
 import type { Authenticator } from "./auth/types";
 import { fileAudit } from "./audit";
 import { NoteStore } from "./notes";
+import { queueSigner } from "@om/sync/src/signer";
 import { loadAdminConfig } from "./config";
 import { JobRunner } from "./jobs";
 import { createAdminServer } from "./server";
@@ -99,9 +100,10 @@ async function main() {
       const q = queueReviewer(cfg.reviewQueue);
       reviewOpts = { reviewer: q, preflight: () => q.ready() };
     }
+    if (cfg.signerQueue && !publicKey) { console.error("signer: signerQueue is set but no public key is available to verify its answers"); return 1; }
     const server = await createAdminServer({
       cfg, publicKey, authenticators, activity, forwarder, jobs: new JobRunner(), audit: fileAudit(cfg.auditLog), secure: !!cfg.tls, env: process.env,
-      loadRegistryConfig: loadRc, reviewOpts, notes: new NoteStore(join(stateDir, "notes.jsonl")),
+      loadRegistryConfig: loadRc, reviewOpts, notes: new NoteStore(join(stateDir, "notes.jsonl")), signer: cfg.signerQueue ? queueSigner(cfg.signerQueue) : undefined,
       password: p ? {
         usersFile: p.usersFile,
         sessions: new SessionStore((p.idleMinutes ?? 30) * 60_000, (p.maxHours ?? 8) * 3_600_000),

@@ -22,12 +22,12 @@ export function signBytes(privatePem: string, bytes: Uint8Array): string {
 const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
 const exists = (p: string) => access(p).then(() => true, () => false);
 
-/** Writes plugins/<id>/<version>/approval.json + .sig after re-checking files on disk against versions.json. */
 /**
+ * Builds and signs an approval WITHOUT writing anything, after re-checking the files on disk against versions.json.
  * Refuses unless a review record matching these exact files has verdict "pass". `override` (a stated reason) allows
- * approving anyway and is recorded in the signed approval.
+ * approving anyway and is recorded in the signed approval. The signer container uses this with a read-only registry.
  */
-export async function approveVersion(outDir: string, id: string, version: string, privatePem: string, by: string, override?: string): Promise<Approval> {
+export async function buildApproval(outDir: string, id: string, version: string, privatePem: string, by: string, override?: string): Promise<{ approval: Approval; bytes: Buffer; sig: string; vdir: string }> {
   if (!isValidPluginId(id) || !isSafeVersion(version)) throw new Error("invalid id or version");
   const pdir = join(outDir, "plugins", id);
   const v = await findEntry(pdir, version);
@@ -52,8 +52,14 @@ export async function approveVersion(outDir: string, id: string, version: string
     ...(reviewVerdict !== "pass" ? { override: override!.trim() } : {}),
   };
   const bytes = Buffer.from(JSON.stringify(approval, null, 2), "utf8");
+  return { approval, bytes, sig: signBytes(privatePem, bytes), vdir };
+}
+
+/** Writes plugins/<id>/<version>/approval.json + .sig (see buildApproval for the checks). */
+export async function approveVersion(outDir: string, id: string, version: string, privatePem: string, by: string, override?: string): Promise<Approval> {
+  const { approval, bytes, sig, vdir } = await buildApproval(outDir, id, version, privatePem, by, override);
   await mkdir(vdir, { recursive: true });
   await writeFile(join(vdir, "approval.json"), bytes);
-  await writeFile(join(vdir, "approval.json.sig"), signBytes(privatePem, bytes));
+  await writeFile(join(vdir, "approval.json.sig"), sig);
   return approval;
 }
