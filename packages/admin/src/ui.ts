@@ -59,7 +59,7 @@ export const INDEX_HTML = `<!doctype html>
       <form id="repoform" class="repoform" autocomplete="off">
         <label for="f-repo" class="muted small">Add a repository whose releases should be mirrored</label>
         <div class="rubricbar">
-          <input id="f-repo" class="repoinput" placeholder="owner/name" maxlength="201" spellcheck="false" aria-label="Repository, as owner/name" required>
+          <input id="f-repo" class="repoinput" placeholder="Repository web address, or owner/name" maxlength="301" spellcheck="false" aria-label="Repository web address, or owner/name" required>
           <input id="f-reponote" class="repoinput" placeholder="Why (optional, shown in the list)" maxlength="200" aria-label="Note about this repository">
           <button id="repocheck" class="btn" type="button" title="Check that the repository has a release sync would accept (adds nothing)">Check</button>
           <button id="repoadd" class="btn primary" type="submit" title="Check, add to the sync list, then run a sync">Add and sync</button>
@@ -233,7 +233,7 @@ function applyFilter(input, root, selector) {
 }
 
 // ---- state shared between panels and the summary cards
-const S = { plugins: [], clients: null, activity: null, jobs: [], selectedJob: null, registryUrl: "", githubWebBase: "", canApprove: false, rubricVersion: "", notesOn: false, notes: [], drawer: null };
+const S = { plugins: [], clients: null, activity: null, jobs: [], selectedJob: null, registryUrl: "", githubWebBase: "", sources: [], canApprove: false, rubricVersion: "", notesOn: false, notes: [], drawer: null };
 let polling = null, activeTab = "plugins", jobRunning = false;
 
 function say(text, kind) { const b = $("banner"); if (!text) { b.hidden = true; return; } b.textContent = text; b.className = "banner" + (kind ? " " + kind : ""); b.hidden = false; }
@@ -328,16 +328,28 @@ async function runJob(path, body) {
 // their own GitHub identity; nothing is sent from here and no token is involved. The text holds only the verdict and a link to
 // the report, never model output (which is derived from untrusted code). The repository comes from index.json but is shape-checked
 // by the server, and the address is built here from the configured GitHub web address.
-const REPO_OK = /^[A-Za-z0-9_.-]+[/][A-Za-z0-9_.-]+$/;
+const REPO_OK = /^[A-Za-z0-9_.:-]+([/][A-Za-z0-9_.-]+)+$/;
+// A stored repository name is owner/name on the default server, or host/path on another configured server. Where its web page is
+// comes from the server list the admin configured, never from the name itself.
+function repoWeb(repo) {
+  if (!repo || !REPO_OK.test(repo)) return null;
+  const first = repo.split("/")[0].toLowerCase();
+  const other = first.indexOf(".") >= 0 ? S.sources.find((x) => !x.isDefault && x.host === first) : null;
+  const src = other || S.sources.find((x) => x.isDefault);
+  const web = safeUrl(src ? src.webBase : S.githubWebBase); if (!web) return null;
+  return { web: web.replace(/[/]+$/, ""), path: other ? repo.slice(first.length + 1) : repo, type: src ? src.type : "github" };
+}
 function issueLink(p, v) {
   const verdict = v.review && ["findings", "fail"].includes(v.review.verdict) ? v.review.verdict : null;
-  const base = S.githubWebBase; if (!verdict || !p.repo || !REPO_OK.test(p.repo) || !(base.startsWith("http://") || base.startsWith("https://")) || !SAFE_ID.test(p.id) || !SAFE_VER.test(v.version)) return null;
+  const w = repoWeb(p.repo); if (!verdict || !w || !SAFE_ID.test(p.id) || !SAFE_VER.test(v.version)) return null;
   const rep = S.registryUrl && (S.registryUrl.startsWith("http://") || S.registryUrl.startsWith("https://")) ? S.registryUrl.replace(/[/]+$/, "") + "/plugins/" + p.id + "/" + v.version + "/review.html" : "";
   const title = "Security review of " + p.id + " " + v.version + ": " + verdict;
   const NL = String.fromCharCode(10);
   const body = "An automated security review of " + p.id + "@" + v.version + " came back with: " + verdict + "." + NL + NL + (rep ? "Full report: " + rep + NL + NL : "") +
     "Please look at the findings and let us know if they are expected or will be addressed." + NL + NL + "(Opened from the marketplace admin; edit this text before posting.)";
-  const a = h("a", "issuelink", "Report issue"); a.href = base.replace(/[/]+$/, "") + "/" + p.repo + "/issues/new?title=" + encodeURIComponent(title) + "&body=" + encodeURIComponent(body);
+  const a = h("a", "issuelink", "Report issue"); a.href = w.type === "gitlab"
+    ? w.web + "/" + w.path + "/-/issues/new?issue%5Btitle%5D=" + encodeURIComponent(title) + "&issue%5Bdescription%5D=" + encodeURIComponent(body)
+    : w.web + "/" + w.path + "/issues/new?title=" + encodeURIComponent(title) + "&body=" + encodeURIComponent(body);
   a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = "Open a prefilled issue on " + p.repo + " (you review and post it yourself)";
   return a;
 }
@@ -369,7 +381,7 @@ function reviewButton(id, version, verdict) {
   return b;
 }
 async function showPlugins() {
-  const { data } = await api("/api/plugins"); S.plugins = (data && data.plugins) || []; S.registryUrl = (data && typeof data.registryUrl === "string") ? data.registryUrl : ""; S.githubWebBase = (data && typeof data.githubWebBase === "string") ? data.githubWebBase : "";
+  const { data } = await api("/api/plugins"); S.plugins = (data && data.plugins) || []; S.registryUrl = (data && typeof data.registryUrl === "string") ? data.registryUrl : ""; S.githubWebBase = (data && typeof data.githubWebBase === "string") ? data.githubWebBase : ""; S.sources = (data && Array.isArray(data.sources)) ? data.sources : [];
   S.canApprove = !!(data && data.canApprove); S.rubricVersion = (data && typeof data.rubricVersion === "string") ? data.rubricVersion : ""; S.notesOn = !!(data && data.notes); if (S.notesOn) { const n = await api("/api/notes"); S.notes = (n.data && n.data.notes) || []; } const box = $("plugins"); box.replaceChildren();
   if (!S.plugins.length) box.append(empty("Nothing mirrored yet", "Click Sync now to pull releases from the configured repositories."));
   for (const p of S.plugins) {
@@ -500,25 +512,26 @@ async function renderImpact(box) {
   box.append(h("p", "muted small", "Each re-review is one paid model call and replaces that version's review. Approvals are not touched, but an approval made on the strength of an older review stays valid until you withdraw it."));
 }
 
-// ---- repositories: which GitHub repositories sync mirrors. Added ones are kept by the admin; registry.config.json is never edited.
+// ---- repositories: which repositories (on any configured git server) sync mirrors. Added ones are kept by the admin; registry.config.json is never edited.
 async function showRepos() {
   const { status, data } = await api("/api/repos"); const box = $("repolist"); box.replaceChildren();
   $("repoform").hidden = status !== 200;
   if (status !== 200 || !data) { box.append(empty("Adding repositories is not enabled", "Repositories are listed in registry.config.json instead.")); return; }
   const pluginsOf = (repo) => S.plugins.filter((p) => (p.repo || "").toLowerCase() === repo.toLowerCase()).map((p) => p.id);
-  const base = safeUrl(S.githubWebBase);
   const rows = [];
   for (const r of data.configured) rows.push({ repo: r, src: "config", by: "", at: "", note: "" });
   for (const n of data.nominated) rows.push({ repo: n.repo, src: "dashboard", by: n.addedBy, at: n.addedAt, note: n.note || "" });
   const cells = rows.map((r) => {
     const ids = pluginsOf(r.repo);
-    const name = base && REPO_OK.test(r.repo) ? extLink(r.repo, base + "/" + r.repo, "Open the repository on GitHub") : h("span", "mono", r.repo);
+    const w = repoWeb(r.repo);
+    const name = w ? extLink(r.repo, w.web + "/" + w.path, "Open the repository") : h("span", "mono", r.repo);
     const act = r.src === "dashboard" ? confirmButton("Remove", "Stop syncing this?", async () => { const x = await api("/api/repos/remove", { repo: r.repo }); say(x.status === 200 ? "Removed " + r.repo + ". Versions already mirrored stay until you withdraw them." : ((x.data && x.data.error) || "Failed"), x.status === 200 ? "ok" : "bad"); await showRepos(); }, true, "Stop syncing this repository. Already-mirrored versions stay in the registry; withdraw them on the Plugins tab.") : h("span", "muted small", "edit registry.config.json");
     act.classList && act.classList.remove("rowbtn"); if (act.disabled !== undefined && r.src === "dashboard") act.disabled = false;
     return [name, ids.length ? ids.join(", ") : h("span", "muted", "nothing mirrored yet"), r.src === "config" ? badge("config file", "muted") : badge("dashboard", "ok"), r.src === "dashboard" ? h("span", null, r.by + " ", when(r.at), r.note ? h("br") : null, r.note || null) : "", act];
   });
   box.append(cells.length ? h("div", "standalone", tbl(["Repository", "Plugin", "Added", "By", ""], cells)) : empty("No repositories yet", "Add one above."));
   box.append(h("p", "muted small", data.note));
+  if (Array.isArray(data.sources) && data.sources.length) box.append(h("p", "muted small", "Git servers this marketplace uses: " + data.sources.map((x) => x.host + " (" + x.type + (x.isDefault ? ", default for owner/name" : "") + ")").join(", ") + ". Repositories on any other server are refused."));
 }
 function renderRepoCheck(c) {
   const box = $("repoout"); box.replaceChildren();

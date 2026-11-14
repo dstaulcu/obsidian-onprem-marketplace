@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Config, RepoConfig } from "@om/sync/src/sync";
-import { isValidRepo } from "@om/sync/src/nominate";
+import { isCanonical, parseRepoRef, resolveSources, sameRepo } from "@om/sync/src/sources";
 
 /**
  * Repositories added from the dashboard. They live in the admin's own state folder and are merged with the hand-edited
@@ -21,7 +21,7 @@ export class RepoStore {
     try {
       const v = JSON.parse(await readFile(this.file, "utf8"));
       if (!Array.isArray(v)) return [];
-      return v.filter((e): e is NominatedRepo => e && isValidRepo(e.repo) && typeof e.addedBy === "string" && typeof e.addedAt === "string").slice(0, MAX_REPOS);
+      return v.filter((e): e is NominatedRepo => e && isCanonical(e.repo) && typeof e.addedBy === "string" && typeof e.addedAt === "string").slice(0, MAX_REPOS);
     } catch { return []; }
   }
 
@@ -32,11 +32,14 @@ export class RepoStore {
     await rename(tmp, this.file);
   }
 
-  /** `configured` are the repositories already in registry.config.json (adding one of those again is refused). */
+  /**
+   * `repo` is the CANONICAL name (from parseRepoRef: owner/name, or host/path for another server); the caller has already
+   * checked it against the configured servers. `configured` are the repositories already in registry.config.json.
+   */
   async add(by: string, repo: unknown, configured: string[], note?: unknown): Promise<NominatedRepo> {
-    if (!isValidRepo(repo)) throw new RepoError("use the form owner/name");
+    if (!isCanonical(repo)) throw new RepoError("that is not a repository name");
     const items = await this.list();
-    const same = (a: string) => a.toLowerCase() === (repo as string).toLowerCase();
+    const same = (a: string) => sameRepo(a, repo as string);
     if (configured.some(same) || items.some((i) => same(i.repo))) throw new RepoError("that repository is already on the sync list");
     if (items.length >= MAX_REPOS) throw new RepoError("too many repositories were added from the dashboard; edit registry.config.json instead");
     let n: string | undefined;
@@ -47,9 +50,9 @@ export class RepoStore {
   }
 
   async remove(repo: unknown): Promise<boolean> {
-    if (!isValidRepo(repo)) throw new RepoError("use the form owner/name");
+    if (!isCanonical(repo)) throw new RepoError("that is not a repository name");
     const items = await this.list();
-    const rest = items.filter((i) => i.repo.toLowerCase() !== repo.toLowerCase());
+    const rest = items.filter((i) => !sameRepo(i.repo, repo));
     if (rest.length === items.length) return false;
     await this.save(rest);
     return true;
@@ -59,7 +62,10 @@ export class RepoStore {
 /** The configured repositories plus the ones added from the dashboard (config wins on duplicates). */
 export async function withNominated(rc: Config, store: RepoStore | undefined): Promise<Config> {
   if (!store) return rc;
-  const have = new Set(rc.repos.map((r) => r.repo.toLowerCase()));
-  const extra: RepoConfig[] = (await store.list()).filter((n) => !have.has(n.repo.toLowerCase())).map((n) => ({ repo: n.repo }));
+  // Compare by canonical name, so a hand-written web address in the config and the same repository added from the dashboard are one.
+  const sources = resolveSources(rc);
+  const canon = (r: string) => { const p = parseRepoRef(r, sources); return p.ok ? p.ref.canonical : r; };
+  const have = rc.repos.map((r) => canon(r.repo));
+  const extra: RepoConfig[] = (await store.list()).filter((n) => !have.some((h) => sameRepo(h, n.repo))).map((n) => ({ repo: n.repo }));
   return extra.length ? { ...rc, repos: [...rc.repos, ...extra] } : rc;
 }

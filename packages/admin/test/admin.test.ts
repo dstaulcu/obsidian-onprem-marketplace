@@ -527,6 +527,36 @@ describe("adding repositories from the dashboard", () => {
     expect((await s.call("/api/repos/remove", { cookie, body: { repo: "acme/a" } })).status).toBe(404);
   });
 
+  it("takes a full web address, on any configured git server, and stores one canonical name", async () => {
+    const s = await withRepos();
+    const old = s.deps.loadRegistryConfig;
+    s.deps.loadRegistryConfig = async () => ({ ...(await old()), sources: [{ webBase: "https://gitlab.corp", type: "gitlab" as const }] });
+    const cookie = await s.login();
+    // GitLab's release list: asset links, and `upcoming_release` instead of draft/prerelease.
+    s.deps.fetcher = async (url) => {
+      if (url.startsWith("https://gitlab.corp/api/v4/projects/grp%2Fsub%2Fp/releases"))
+        return new Response(JSON.stringify([{ tag_name: "1.0.0", released_at: "2026-01-01T00:00:00Z", upcoming_release: false, assets: { links: [
+          { name: "main.js", url: "https://gitlab.corp/dl/main.js" }, { name: "manifest.json", url: "https://gitlab.corp/dl/manifest.json" }] } }]));
+      if (url === "https://gitlab.corp/dl/manifest.json") return new Response(manifest("1.0.0").replace('"demo"', '"glplug"'));
+      return new Response("code");
+    };
+    expect((await s.call("/api/repos", { cookie })).data.sources.map((x: any) => x.host)).toEqual(["gh", "gitlab.corp"]);
+    const chk = await s.call("/api/repos/check", { cookie, body: { repo: "https://gitlab.corp/grp/sub/p/-/releases" } });
+    expect(chk.data.ok).toBe(true);
+    expect(chk.data.repo).toBe("gitlab.corp/grp/sub/p");
+    expect((await s.call("/api/repos", { cookie, body: { repo: "https://gitlab.corp/grp/sub/p.git" } })).status).toBe(201);
+    expect((await s.call("/api/repos", { cookie, body: { repo: "https://GITLAB.corp/grp/sub/p/" } })).status).toBe(409); // the same repository, written another way
+    expect((await s.call("/api/repos", { cookie })).data.nominated.map((n: any) => n.repo)).toEqual(["gitlab.corp/grp/sub/p"]);
+    // a server that is not on the list is refused before anything is fetched
+    let touched = false;
+    s.deps.fetcher = async () => { touched = true; return new Response("{}"); };
+    const evil = await s.call("/api/repos/check", { cookie, body: { repo: "https://evil.example/a/b" } });
+    expect(evil.status).toBe(400);
+    expect(evil.data.error).toMatch(/not a git server/);
+    expect(touched).toBe(false);
+    expect((await s.call("/api/repos/remove", { cookie, body: { repo: "https://gitlab.corp/grp/sub/p" } })).status).toBe(200);
+  });
+
   it("throttles checks", async () => {
     const s = await withRepos();
     const cookie = await s.login();

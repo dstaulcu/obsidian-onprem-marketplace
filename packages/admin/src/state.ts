@@ -1,3 +1,4 @@
+import { isCanonical } from "@om/sync/src/sources";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { checkApproval, checkReview, isValidPluginId, isSafeVersion, type VersionEntry } from "@om/shared";
@@ -18,13 +19,12 @@ const read = (p: string) => readFile(p).then((b) => new Uint8Array(b) as Uint8Ar
  * without one, signed records are reported as unverified rather than trusted. The folder holds data mirrored from
  * third-party repos, so every string here is untrusted and the UI must render it as text.
  */
-const REPO_RE = /^[A-Za-z0-9_.-]+[/][A-Za-z0-9_.-]+$/;
 /** id -> owner/repo from index.json. It is data from the registry folder, so it is shape-checked before anyone builds a link from it. */
 async function readRepos(outDir: string): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   try {
     for (const e of JSON.parse(await readFile(join(outDir, "index.json"), "utf8")) as { id?: unknown; repo?: unknown }[])
-      if (typeof e.id === "string" && typeof e.repo === "string" && REPO_RE.test(e.repo)) out[e.id] = e.repo;
+      if (typeof e.id === "string" && typeof e.repo === "string" && isCanonical(e.repo)) out[e.id] = e.repo;
   } catch { /* no index yet */ }
   return out;
 }

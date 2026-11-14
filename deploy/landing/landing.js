@@ -6,7 +6,7 @@
   const get = async (path) => { try { const r = await fetch(path, { cache: "no-cache" }); return r.ok ? await r.json() : null; } catch { return null; } };
   const el = (tag, cls, ...kids) => { const e = document.createElement(tag); if (cls) e.className = cls; for (const k of kids) if (k !== null && k !== undefined && k !== false) e.append(k instanceof Node ? k : document.createTextNode(String(k))); return e; };
   const cut = (v, n) => String(v === undefined || v === null ? "" : v).slice(0, n);
-  const SAFE_REPO = /^[A-Za-z0-9_.-]+[/][A-Za-z0-9_.-]+$/, SAFE_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/, SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+  const SAFE_REPO = /^[A-Za-z0-9_.:-]+([/][A-Za-z0-9_.-]+)+$/, SAFE_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/, SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
   const isHttps = (u) => typeof u === "string" && u.startsWith("https://");
 
   const cfg = (await get("/landing.json")) || {};
@@ -77,6 +77,15 @@
   };
   const rel = (iso) => { const ms = Date.parse(iso); if (isNaN(ms)) return ""; const d = Math.round((Date.now() - ms) / 86400000); return d <= 0 ? "today" : d === 1 ? "yesterday" : d < 60 ? d + " days ago" : new Date(ms).toISOString().slice(0, 10); };
 
+  // Where a plugin's source lives. The repo name comes from the registry (untrusted), so the server it names is only looked up in
+  // landing.json (admin-controlled): sourceBase for owner/name, sourceBases for host/path on other servers. Nothing else becomes a link.
+  const bases = cfg.sourceBases && typeof cfg.sourceBases === "object" ? cfg.sourceBases : {};
+  const sourceLink = (repo) => {
+    if (!SAFE_REPO.test(repo)) return "";
+    const first = repo.split("/")[0].toLowerCase();
+    if (first.includes(".") && Object.prototype.hasOwnProperty.call(bases, first)) return isHttps(bases[first]) ? bases[first].replace(/\/+$/, "") + "/" + repo.slice(first.length + 1) : "";
+    return isHttps(cfg.sourceBase) ? cfg.sourceBase.replace(/\/+$/, "") + "/" + repo : "";
+  };
   const card = (p, isPinned) => {
     const li = el("li", "card" + (isPinned ? " pinned" : ""));
     const top = el("div", "row", el("span", "name", cut(p.name || p.id, 120), isPinned ? el("span", "tag", "Featured") : null), el("span", "ver", "v" + cut(p.latestVersion || "?", 40)));
@@ -86,9 +95,8 @@
     if (p.isDesktopOnly) meta.push("desktop only");
     const n = installs(p.id); if (n !== null) meta.push(n + " client" + (n === 1 ? "" : "s") + " in " + cut(stats.windowDays, 4) + " days");
     li.append(top, el("div", "desc", cut(p.description, 300)), el("div", "muted small", meta.join("  |  ")));
-    if (isHttps(cfg.sourceBase) && SAFE_REPO.test(String(p.repo || ""))) {
-      const a = el("a", "src", "Source and feedback"); a.href = cfg.sourceBase.replace(/\/+$/, "") + "/" + p.repo; a.target = "_blank"; a.rel = "noopener noreferrer"; li.append(a);
-    }
+    const link = sourceLink(String(p.repo || ""));
+    if (link) { const a = el("a", "src", "Source and feedback"); a.href = link; a.target = "_blank"; a.rel = "noopener noreferrer"; li.append(a); }
     return li;
   };
   const render = () => {

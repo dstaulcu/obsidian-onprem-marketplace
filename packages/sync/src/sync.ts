@@ -3,11 +3,13 @@ import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { addEntry, promoteStaged, type PublishPolicy } from "./catalog";
 import type { ProviderConfig } from "./reviewers";
+import { listReleases, RateLimitError, throwFor, type Fetcher, type NormalRelease } from "./providers";
+import { parseRepoRef, resolveSources, sameRepo, type Source, type SourceConfig } from "./sources";
 import {
   compareSemver, validateManifest, type IndexEntry, type PluginManifest, type VersionEntry,
 } from "@om/shared";
 
-export interface RepoConfig { repo: string; pinVersions?: string[]; /** Mirror only the newest N eligible releases (overrides Config.maxVersions). */ maxVersions?: number; }
+export interface RepoConfig { /** owner/name on the default server, or a full web address / host/path for a configured source (see sources.ts). */ repo: string; pinVersions?: string[]; /** Mirror only the newest N eligible releases (overrides Config.maxVersions). */ maxVersions?: number; }
 export interface ReviewConfig extends ProviderConfig {
   enabled?: boolean;
   /** provider "claude-code": full path to the Claude Code executable. */
@@ -20,8 +22,11 @@ export interface ReviewConfig extends ProviderConfig {
   signingKeyPath?: string;
 }
 export interface Config {
+  /** The default git server (GitHub or GitHub Enterprise). Other servers, including GitLab, go in `sources`. */
   githubApiBase: string;
   tokenEnv?: string;
+  /** Extra git servers repositories may come from; only these hosts are ever contacted. */
+  sources?: SourceConfig[];
   outDir: string;
   /** Default cap on newest releases mirrored per repo; omit for no cap. */
   maxVersions?: number;
@@ -31,10 +36,8 @@ export interface Config {
   review?: ReviewConfig;
   repos: RepoConfig[];
 }
-interface Asset { name: string; url: string; }
-interface Release { tag_name: string; draft: boolean; prerelease: boolean; published_at: string; assets: Asset[]; }
-
-export type Fetcher = (url: string, accept?: string) => Promise<Response>;
+export type { Fetcher };
+export { RateLimitError };
 
 const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
 const exists = (p: string) => access(p).then(() => true, () => false);
@@ -44,24 +47,9 @@ export function makeFetcher(token?: string): Fetcher {
     fetch(url, { headers: { Accept: accept, ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
 }
 
-export class RateLimitError extends Error {}
-function fail(url: string, r: Response): never {
-  if ((r.status === 403 || r.status === 429) && r.headers.get("x-ratelimit-remaining") === "0") {
-    const reset = Number(r.headers.get("x-ratelimit-reset"));
-    const when = reset ? ` (resets ${new Date(reset * 1000).toLocaleTimeString()})` : "";
-    throw new RateLimitError(`GitHub rate limit reached${when}; set the token env var or lower maxVersions, then re-run`);
-  }
-  throw new Error(`${url} -> ${r.status}`);
-}
-
-async function getJson<T>(f: Fetcher, url: string): Promise<T> {
-  const r = await f(url);
-  if (!r.ok) fail(url, r);
-  return (await r.json()) as T;
-}
-async function getBytes(f: Fetcher, url: string): Promise<Uint8Array> {
+async function getBytes(f: Fetcher, url: string, src: Source): Promise<Uint8Array> {
   const r = await f(url, "application/octet-stream");
-  if (!r.ok) fail(url, r);
+  if (!r.ok) throwFor(src, url, r);
   return new Uint8Array(await r.arrayBuffer());
 }
 
@@ -78,44 +66,48 @@ export async function syncRegistry(cfg: Config, f: Fetcher, log: (line: string) 
   let owners: Record<string, string> = {};
   try { owners = Object.fromEntries((JSON.parse(await readFile(join(cfg.outDir, "index.json"), "utf8")) as IndexEntry[]).filter((e) => e.repo).map((e) => [e.id, e.repo])); } catch { /* no index yet */ }
 
-  for (const rc of cfg.repos) {
+  const sources = resolveSources(cfg);
+  for (const rc0 of cfg.repos) {
+    const parsed = parseRepoRef(rc0.repo, sources);
+    if (!parsed.ok) { res.errors.push(`${rc0.repo}: ${parsed.reason}`); continue; }
+    const rc = { ...rc0, repo: parsed.ref.canonical }, src = parsed.ref.source;
     try {
-      const releases = await getJson<Release[]>(f, `${cfg.githubApiBase}/repos/${rc.repo}/releases?per_page=100`);
+      const releases: NormalRelease[] = await listReleases(f, src, parsed.ref.path, 100);
       const max = rc.maxVersions ?? cfg.maxVersions;
       let taken = 0;
       const ignored = releases.filter((r) => r.draft || r.prerelease).length;
-      log(`${rc.repo}: ${releases.length} release(s) on GitHub` + (ignored ? `, ${ignored} pre-release/draft ignored` : "") + (max ? `, newest ${max} considered` : ""));
+      log(`${rc.repo}: ${releases.length} release(s) on ${src.type === "gitlab" ? "GitLab" : "GitHub"}` + (ignored ? `, ${ignored} pre-release/draft ignored` : "") + (max ? `, newest ${max} considered` : ""));
       for (const rel of releases) {
         if (rel.draft || rel.prerelease) continue;
-        const tagVer = rel.tag_name.replace(/^v/, "");
-        if (rc.pinVersions && !rc.pinVersions.includes(tagVer)) { log(`  - ${rel.tag_name}: not in pinVersions, left out`); continue; }
-        if (max && taken++ >= max) { log(`  - older releases from ${rel.tag_name} on are beyond maxVersions (${max}), left out`); break; }
-        const label = `${rc.repo}@${rel.tag_name}`;
+        const tagVer = rel.tag.replace(/^v/, "");
+        if (rc.pinVersions && !rc.pinVersions.includes(tagVer)) { log(`  - ${rel.tag}: not in pinVersions, left out`); continue; }
+        if (max && taken++ >= max) { log(`  - older releases from ${rel.tag} on are beyond maxVersions (${max}), left out`); break; }
+        const label = `${rc.repo}@${rel.tag}`;
         try {
           const byName = new Map(rel.assets.map((a) => [a.name, a]));
           const mAsset = byName.get("manifest.json");
           const jsAsset = byName.get("main.js");
           if (!mAsset || !jsAsset) throw new Error("release lacks main.js/manifest.json");
-          const manifestBytes = await getBytes(f, mAsset.url);
+          const manifestBytes = await getBytes(f, mAsset.url, src);
           const manifest = JSON.parse(Buffer.from(manifestBytes).toString("utf8")) as PluginManifest;
           const errs = validateManifest(manifest);
           if (errs.length) throw new Error(errs.join(", "));
-          if (manifest.version !== tagVer) throw new Error(`tag ${rel.tag_name} != manifest version ${manifest.version}`);
+          if (manifest.version !== tagVer) throw new Error(`tag ${rel.tag} != manifest version ${manifest.version}`);
           const owner = repoOfPlugin[manifest.id] ?? owners[manifest.id];
-          if (owner && owner.toLowerCase() !== rc.repo.toLowerCase()) throw new Error(`plugin id "${manifest.id}" is already provided by ${owner}; not mixing in versions from ${rc.repo}`);
+          if (owner && !sameRepo(owner, rc.repo)) throw new Error(`plugin id "${manifest.id}" is already provided by ${owner}; not mixing in versions from ${rc.repo}`);
           repoOfPlugin[manifest.id] = rc.repo;
           const vdir = join(pluginsDir, manifest.id, manifest.version);
           if (await exists(join(vdir, "manifest.json"))) { res.skipped.push(label); log(`  = ${manifest.id}@${manifest.version}: already mirrored`); continue; }
-          const mainBytes = await getBytes(f, jsAsset.url);
+          const mainBytes = await getBytes(f, jsAsset.url, src);
           const sAsset = byName.get("styles.css");
-          const stylesBytes = sAsset ? await getBytes(f, sAsset.url) : undefined;
+          const stylesBytes = sAsset ? await getBytes(f, sAsset.url, src) : undefined;
           await mkdir(vdir, { recursive: true });
           await writeFile(join(vdir, "main.js"), mainBytes);
           if (stylesBytes) await writeFile(join(vdir, "styles.css"), stylesBytes);
           // manifest written last: its presence marks the version as complete
           await writeFile(join(vdir, "manifest.json"), manifestBytes);
           const entry: VersionEntry = {
-            version: manifest.version, minAppVersion: manifest.minAppVersion, published: rel.published_at,
+            version: manifest.version, minAppVersion: manifest.minAppVersion, published: rel.published,
             sha256: { main: sha(mainBytes), manifest: sha(manifestBytes), styles: stylesBytes ? sha(stylesBytes) : "" },
             hasStyles: !!stylesBytes,
           };

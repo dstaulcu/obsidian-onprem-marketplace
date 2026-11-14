@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { resolveSources } from "@om/sync/src/sources";
 import { dirname, join } from "node:path";
 import type { Config } from "@om/sync/src/sync";
 import type { ReviewOpts } from "@om/sync/src/jobs";
@@ -94,7 +95,8 @@ async function main() {
     const stateDir = cfg.stateDir ?? join(dirname(cfg.auditLog), "state");
     const activity = cfg.accessLog ? new AccessProcessor({ logFile: cfg.accessLog, stateFile: join(stateDir, "activity.json"), networks: cfg.networks ?? [], basePath: cfg.basePath }) : undefined;
     const forwarder = await buildForwarder(cfg);
-    const loadRc = async () => JSON.parse(await readFile(cfg.registryConfig, "utf8")) as Config;
+    const loadRc = async () => { const c = JSON.parse(await readFile(cfg.registryConfig, "utf8")) as Config; resolveSources(c, cfg.githubWebBase); return c; };
+    try { await loadRc(); } catch (e) { console.error("registry config: " + (e as Error).message); process.exit(1); }
     // Keep a copy of the rubric this image ships with, so a later change can be compared against it.
     try { await saveSnapshot(join(stateDir, "rubrics"), await loadRubric((await loadRc()).review?.rubricDir ?? "rubric")); } catch (e) { console.warn("rubric snapshot skipped:", (e as Error).message); }
     // With a review queue, the model call happens in the separate reviewer container and never in this process.

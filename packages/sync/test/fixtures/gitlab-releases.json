@@ -1,0 +1,64 @@
+[
+  {
+    "name": "v1.130.0",
+    "tag_name": "v1.130.0",
+    "released_at": "2026-11-10T13:22:52.624Z",
+    "upcoming_release": false,
+    "assets": {
+      "count": 40,
+      "sources": [
+        {
+          "format": "zip",
+          "url": "https://gitlab.com/gitlab-org/cli/-/archive/v1.130.0/cli-v1.130.0.zip"
+        }
+      ],
+      "links": [
+        {
+          "id": 14153975,
+          "name": "glab_1.130.0_linux_armv6.apk",
+          "url": "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/1%2E130%2E0/glab_1%2E130%2E0_linux_armv6%2Eapk",
+          "direct_asset_url": "https://gitlab.com/gitlab-org/cli/-/releases/v1.130.0/downloads/glab_1.130.0_linux_armv6.apk",
+          "link_type": "other"
+        },
+        {
+          "id": 14153974,
+          "name": "glab_1.130.0_linux_s390x.tar.gz",
+          "url": "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/1%2E130%2E0/glab_1%2E130%2E0_linux_s390x%2Etar%2Egz",
+          "direct_asset_url": "https://gitlab.com/gitlab-org/cli/-/releases/v1.130.0/downloads/glab_1.130.0_linux_s390x.tar.gz",
+          "link_type": "other"
+        }
+      ]
+    }
+  },
+  {
+    "name": "v1.129.0",
+    "tag_name": "v1.129.0",
+    "released_at": "2026-11-10T12:18:03.292Z",
+    "upcoming_release": false,
+    "assets": {
+      "count": 40,
+      "sources": [
+        {
+          "format": "zip",
+          "url": "https://gitlab.com/gitlab-org/cli/-/archive/v1.129.0/cli-v1.129.0.zip"
+        }
+      ],
+      "links": [
+        {
+          "id": 14152400,
+          "name": "glab_1.129.0_linux_amd64.apk",
+          "url": "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/1%2E129%2E0/glab_1%2E129%2E0_linux_amd64%2Eapk",
+          "direct_asset_url": "https://gitlab.com/gitlab-org/cli/-/releases/v1.129.0/downloads/glab_1.129.0_linux_amd64.apk",
+          "link_type": "other"
+        },
+        {
+          "id": 14152399,
+          "name": "glab_1.129.0_darwin_arm64.tar.gz",
+          "url": "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/1%2E129%2E0/glab_1%2E129%2E0_darwin_arm64%2Etar%2Egz",
+          "direct_asset_url": "https://gitlab.com/gitlab-org/cli/-/releases/v1.129.0/downloads/glab_1.129.0_darwin_arm64.tar.gz",
+          "link_type": "other"
+        }
+      ]
+    }
+  }
+]

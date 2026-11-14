@@ -4,7 +4,9 @@ import { promoteStaged, type PublishPolicy } from "./catalog";
 import { makeReviewer } from "./reviewers";
 import { reviewVersion, type Reviewer } from "./review";
 import { loadRubric } from "./rubric";
-import { makeFetcher, rebuildIndex, syncRegistry, type Config, type SyncResult } from "./sync";
+import { rebuildIndex, syncRegistry, type Config, type SyncResult } from "./sync";
+import { makeSourceFetcher } from "./providers";
+import { readToken, resolveSources } from "./sources";
 
 /**
  * Admin jobs shared by the CLI and the admin service. Output goes through an injectable Log so the service can
@@ -66,9 +68,11 @@ export async function runReviews(cfg: Config, targets: { id: string; version: st
 }
 
 /** Mirrors new releases, then (if enabled) reviews what was added and publishes anything the policy now allows. */
-export async function runSync(cfg: Config, out: Log = consoleLog, env: NodeJS.ProcessEnv = process.env, fetcher = makeFetcher(cfg.tokenEnv ? env[cfg.tokenEnv] : undefined), reviewOpts: ReviewOpts = {}): Promise<SyncResult> {
+export async function runSync(cfg: Config, out: Log = consoleLog, env: NodeJS.ProcessEnv = process.env, fetcher = makeSourceFetcher(resolveSources(cfg), env), reviewOpts: ReviewOpts = {}): Promise<SyncResult> {
   const t0 = Date.now();
-  out.log(`sync: checking ${cfg.repos.length} repositor${cfg.repos.length === 1 ? "y" : "ies"} at ${cfg.githubApiBase}` + (cfg.tokenEnv && !env[cfg.tokenEnv] ? ` (${cfg.tokenEnv} is not set: anonymous GitHub rate limit applies)` : ""));
+  const srcs = resolveSources(cfg);
+  out.log(`sync: checking ${cfg.repos.length} repositor${cfg.repos.length === 1 ? "y" : "ies"} on ${srcs.map((x) => x.host).join(", ")}`);
+  for (const x of srcs) if ((x.tokenEnv || x.tokenFile) && !(await readToken(x, env))) out.log(`  note: no token for ${x.host} (${x.tokenEnv ?? x.tokenFile} is not set): anonymous rate limits apply and private repositories are invisible`);
   const r = await syncRegistry(cfg, fetcher, (l) => out.log(l));
   out.log(`result: added ${r.added.length}, already present ${r.skipped.length}, errors ${r.errors.length} (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
   r.errors.forEach((e) => out.err("  ! " + e));

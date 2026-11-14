@@ -14,8 +14,9 @@ import { loadRubric, type Rubric } from "@om/sync/src/rubric";
 import { diffSnapshots, listSnapshots, loadSnapshot, saveSnapshot, staleTargets, staticImpact, toSnapshot } from "@om/sync/src/rubricdiff";
 import { NoteError, type NoteStore } from "./notes";
 import { RepoError, withNominated, type RepoStore } from "./repos";
-import { checkRepo, isValidRepo, mirroredRepos } from "@om/sync/src/nominate";
-import { makeFetcher } from "@om/sync/src/sync";
+import { checkRepo, mirroredRepos } from "@om/sync/src/nominate";
+import { makeSourceFetcher } from "@om/sync/src/providers";
+import { isCanonical, parseRepoRef, resolveSources, sameRepo } from "@om/sync/src/sources";
 import type { Audit } from "./audit";
 import type { AdminConfig } from "./config";
 import { Busy, JobRunner } from "./jobs";
@@ -162,7 +163,7 @@ export function createHandler(d: Deps): RequestListener {
       }
       if (method === "GET" && path === "/api/plugins") {
         const rc = await loadRc(d);
-        json(res, 200, { registryUrl: d.cfg.registryUrl ?? null, githubWebBase: githubWebBase(d.cfg.githubWebBase, rc.githubApiBase), publishPolicy: rc.publishPolicy ?? "all", notes: !!d.notes, canApprove: !!d.signer, rubricVersion: (await rubricCtx(d, rc).catch(() => null))?.current.version ?? null, plugins: await registryState(rc.outDir, d.publicKey) });
+        json(res, 200, { registryUrl: d.cfg.registryUrl ?? null, githubWebBase: githubWebBase(d.cfg.githubWebBase, rc.githubApiBase), sources: resolveSources(rc, d.cfg.githubWebBase).map((x) => ({ host: x.host, type: x.type, webBase: x.webBase, isDefault: x.isDefault })), publishPolicy: rc.publishPolicy ?? "all", notes: !!d.notes, canApprove: !!d.signer, rubricVersion: (await rubricCtx(d, rc).catch(() => null))?.current.version ?? null, plugins: await registryState(rc.outDir, d.publicKey) });
         return;
       }
       if (method === "GET" && path === "/api/jobs") {
@@ -310,14 +311,18 @@ export function createHandler(d: Deps): RequestListener {
       if (path === "/api/repos" || path === "/api/repos/check" || path === "/api/repos/remove") {
         if (!d.repos) throw new HttpError(404, "adding repositories from the dashboard is not enabled");
         const base = await d.loadRegistryConfig();
+        const sources = resolveSources(base, d.cfg.githubWebBase);
+        const canon = (r: string) => { const p = parseRepoRef(r, sources); return p.ok ? p.ref.canonical : r; };
         if (method === "GET" && path === "/api/repos") {
-          json(res, 200, { configured: base.repos.map((r) => r.repo), nominated: await d.repos.list(), note: "Adding a repository only lets sync mirror its releases. Nothing is installable until a version is reviewed and approved." });
+          json(res, 200, { configured: base.repos.map((r) => canon(r.repo)), sources: sources.map((x) => ({ host: x.host, type: x.type, webBase: x.webBase, isDefault: x.isDefault })), nominated: await d.repos.list(), note: "Adding a repository only lets sync mirror its releases. Nothing is installable until a version is reviewed and approved." });
           return;
         }
         if (method !== "POST") throw new HttpError(405, "use POST");
         const body = await readJson(req);
-        if (!isValidRepo(body.repo)) throw new HttpError(400, "use the form owner/name, for example acme/my-plugin");
-        const repo = body.repo;
+        const parsed = parseRepoRef(body.repo, sources);
+        // Removing also accepts an already-stored name whose server has since left the config.
+        const repo = parsed.ok ? parsed.ref.canonical : path === "/api/repos/remove" && isCanonical(body.repo) ? body.repo : null;
+        if (repo === null) throw new HttpError(400, parsed.ok ? "that is not a repository name" : parsed.reason);
         if (path === "/api/repos/remove") {
           const ok = await d.repos.remove(repo);
           if (!ok) throw new HttpError(404, "that repository was not added from the dashboard (repositories in registry.config.json are removed by editing it)");
@@ -330,8 +335,8 @@ export function createHandler(d: Deps): RequestListener {
         if (repoChecks.length >= 20) throw new HttpError(429, "too many checks; wait a minute");
         repoChecks.push(now);
         const rc = await loadRc(d);
-        const f = d.fetcher ?? makeFetcher(rc.tokenEnv ? (d.env ?? process.env)[rc.tokenEnv] : undefined);
-        const check = await checkRepo(rc.githubApiBase, f, repo, await mirroredRepos(rc.outDir));
+        const f = d.fetcher ?? makeSourceFetcher(resolveSources(rc, d.cfg.githubWebBase), d.env ?? process.env);
+        const check = await checkRepo(resolveSources(rc, d.cfg.githubWebBase), f, repo, await mirroredRepos(rc.outDir));
         if (path === "/api/repos/check") {
           await d.audit.record(who.name, "repo.check", { target: repo, ok: check.ok }, ip);
           json(res, 200, check);
@@ -340,7 +345,7 @@ export function createHandler(d: Deps): RequestListener {
         // Adding re-runs the check here; the page's earlier answer is never trusted.
         if (!check.ok) throw new HttpError(422, check.summary);
         try {
-          const e = await d.repos.add(who.name, repo, base.repos.map((r) => r.repo), body.note);
+          const e = await d.repos.add(who.name, repo, base.repos.map((r) => canon(r.repo)), body.note);
           await d.audit.record(who.name, "repo.add", { target: repo, ...(e.note ? { note: e.note } : {}) }, ip);
           json(res, 201, { repo: e, check });
         } catch (e) { if (e instanceof RepoError) throw new HttpError(409, e.message); throw e; }

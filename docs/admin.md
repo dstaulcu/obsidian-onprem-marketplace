@@ -105,6 +105,10 @@ clients stay installed**: clients cannot be told to uninstall, and there is no s
 most used), a **Featured** plugin pinned first, per-plugin **client counts**, a **Source and feedback** link, a **Nominate a plugin** link,
 and downloads. Everything read from the registry is shown as text only.
 
+Source links: `sourceBase` covers repositories on the default server (`owner/name`); `sourceBases` maps the other git servers, e.g.
+`"sourceBases": { "gitlab.example.internal": "https://gitlab.example.internal" }`. A repository on a server that is not listed in
+`landing.json` gets no link (the page never builds a link from registry data alone).
+
 Settings are in `deploy/landing/landing.json` (edit, then refresh the page; no restart): `pinned` (plugin ids shown first, in order;
 default `onprem-marketplace`), `sourceBase` (https address that `owner/name` is appended to for the source link; omit for none), `nominateUrl`. The Get started tab also reads `keyHelp`, `keyUrl`, `contact` and `toolHint`: the sentence about where to
 save `om.exe`. The default says "your Downloads folder"; set `toolHint` if your site blocks programs there (for example to name
@@ -127,7 +131,7 @@ GitHub issue form (`.github/ISSUE_TEMPLATE/nominate-plugin.yml`) in the reposito
 https address; point it at your own tracker). The nominator needs no registry account. Nothing about a nomination is automatic: an admin
 decides.
 
-**For admins: the Repositories tab.** Enter `owner/name` and press **Check** to see, without changing anything, whether sync would accept the
+**For admins: the Repositories tab.** Enter the repository's web address (or `owner/name` for the default server) and press **Check** to see, without changing anything, whether sync would accept the
 repository: it exists (and the registry's token can see it), it has a published release (drafts and pre-releases are ignored), the release
 carries `main.js` and `manifest.json`, the manifest is valid, and the tag equals the manifest version. The three newest releases are tried
 and each problem is listed. **Add and sync** repeats the check on the server (the page's earlier answer is never trusted), adds the
@@ -141,6 +145,24 @@ repository and runs a sync.
 - **A plugin id belongs to the repository that first provided it.** The check refuses a repository that declares an id another repository
   already provides, and sync itself refuses to mix in versions under that id from a different repository (it reports an error and skips them).
   Without this, a second repository could add its own versions under another plugin's name.
+- **More than one git server.** `githubApiBase` and `tokenEnv` are the default server. Others, GitHub Enterprise or GitLab, are listed
+  under `sources` in `registry.config.json`:
+
+  ```json
+  "sources": [
+    { "webBase": "https://github.example.internal", "type": "github", "tokenEnv": "GHE_TOKEN" },
+    { "webBase": "https://gitlab.example.internal", "type": "gitlab", "tokenFile": "/run/secrets/gitlab-token" }
+  ]
+  ```
+
+  The API address defaults to `<webBase>/api/v3` (github) or `/api/v4` (gitlab); set `apiBase` to override. Set at most one of `tokenEnv`
+  and `tokenFile` (a mounted secret is the better fit for an orchestrator; the token itself never goes in the config). A repository
+  is named by its web address, `owner/name` (default server), or `host/group/name`; the page stores one canonical form, so the same
+  repository written two ways is one entry, and `a/b` on two servers are two. **Only listed servers are ever contacted**: an address on any
+  other host is refused before any request, each token is sent only to its own server, and a release whose asset link points to some other
+  host is not fetched. A plugin id still belongs to the first repository that provided it, whichever server it is on. For GitLab,
+  the release needs links named `main.js` and `manifest.json` (and optionally `styles.css`); an "upcoming" release counts as a
+  pre-release. GitLab support is written against a real gitlab.com response but has not been run against your own GitLab yet.
 - Every check, add and remove is audited (`repo.check`, `repo.add`, `repo.remove`), checks are limited to 20 a minute, and a note you type is
   stored as plain text.
 
