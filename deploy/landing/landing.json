@@ -1,3 +1,7 @@
 {
-  "nominateUrl": "https://github.com/dstaulcu/obsidian-onprem-marketplace/issues/new?template=nominate-plugin.yml"
+  "nominateUrl": "https://github.com/dstaulcu/obsidian-onprem-marketplace/issues/new?template=nominate-plugin.yml",
+  "sourceBase": "https://github.com",
+  "pinned": ["onprem-marketplace"],
+  "keyHelp": "Compare it with the fingerprint your admins publish.",
+  "contact": "Ask the marketplace admins."
 }

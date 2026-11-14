@@ -9,6 +9,7 @@ import { makeReviewer } from "./reviewers";
 import { runWorker, validateReviewQueue } from "./reviewqueue";
 import { loadSigningKey, signerHandler } from "./signer";
 import { runLoop } from "./workqueue";
+import { publishDownload } from "./downloads";
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -34,6 +35,16 @@ if (cmd === "keygen") {
   const a = await approveVersion(registry, id, version, await readFile(keyPath, "utf8"), by, flag("override"));
   console.log(`approved ${a.id}@${a.version} by ${a.approvedBy} (review: ${a.reviewVerdict}${a.override ? `, override: ${a.override}` : ""})`);
   await publishHeld(registry, (flag("policy") as PublishPolicy | undefined) ?? "all");
+} else if (cmd === "publish-download") {
+  // om-sync publish-download <file> --version <v> [--registry registry] [--name om.exe] [--note text]
+  const flag = (n: string, d?: string) => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : d; };
+  const file = rest[0], version = flag("version");
+  if (!file || file.startsWith("--") || !version) { console.error("usage: publish-download <file> --version <v> [--registry dir] [--name name] [--note text]"); process.exit(2); }
+  try {
+    const e = await publishDownload(flag("registry", "registry")!, file, { version, name: flag("name"), note: flag("note") });
+    console.log(`published downloads/${e.name} ${e.version} (${(e.size / 1048576).toFixed(1)} MB)
+sha256 ${e.sha256}`);
+  } catch (e) { console.error((e as Error).message); process.exit(1); }
 } else if (cmd === "rubric") {
   // om-sync rubric [--dir rubric] [--write docs/concepts/rubric.md]   -> validates the rubric, runs every rule's examples
   const flag = (n: string, d?: string) => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : d; };

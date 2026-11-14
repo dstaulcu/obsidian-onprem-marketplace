@@ -7,7 +7,11 @@
 > (`172.18.0.1`), so zones and distinct counts are not meaningful there; and the dashboard page has not been viewed in
 > a browser. Expect rough edges and do not expose it beyond a test network yet.
 
-A small web interface for the registry admin: see what is mirrored, staged, reviewed and approved, and trigger **sync**
+**Wording.** *Marketplace* is the product people see: the Obsidian plugin, the web page and this dashboard. *Registry* is the technical file store
+behind it (the folder or web address that serves `index.json` and the plugin files), and keeps its name in flags, settings keys and file names
+(`--registry`, `registryUrl`, `registry.config.json`, `registry-data/`).
+
+A small web interface for the marketplace admin: see what is mirrored, staged, reviewed and approved, and trigger **sync**
 and **review**, withdraw or release versions, and (optionally) **approve**. The admin process never holds the signing key: approving
 is done by a separate [signer container](#approving-from-the-dashboard-the-signer), or on the CLI where the key lives (see
 [Security](#security-model)).
@@ -43,7 +47,13 @@ TLS is mandatory; the service refuses to start without it unless `allowInsecureH
    Keep `ca.key` offline; the service only needs `admin-ca.crt`.
 2. **Config.** Copy `admin.config.example.json` to `config/admin.config.json` and edit. `registry.config.json` there
    must use `"outDir": "/data"` and should **not** set `review.signingKeyPath` unless you accept the trade-off below.
-   Put the registry public key in `config/public-key.txt` (the admin view uses it only to verify approvals).
+   Put the registry public key in `config/public-key.txt` (the admin view uses it only to verify approvals). The registry
+   container also serves this file, read-only, at `/public-key.txt`: `om init --registry <url>` fetches it, pins it and
+   prints its fingerprint, so users do not need a key file from you. Trust is on first use: whoever answers that first
+   request chooses the key, over http as well as https (use https for real). A key already pinned is never replaced
+   unless the user passes `--fetch-key`, so a later change on the server does not reach existing users. To let people
+   confirm the key, publish its fingerprint somewhere else (`om fingerprint config/public-key.txt`). Users who want
+   certainty can still pass `--key <file>`.
 3. **Passwords (optional).** On the host: `node packages/admin/dist/admin.cjs passwd alice --users config/admin-users.json`
    (prompted, min 12 characters; or `OM_ADMIN_PASSWORD` for scripting).
 4. **Run.** `docker compose up --build` starts the admin on `https://localhost:8443` and the read-only registry on
@@ -87,6 +97,28 @@ These only ever make the clients' view stricter, or restore what the policy alre
 They run as audited jobs (`manage.<action>`), so they cannot interleave with a sync or review. **Copies already installed on
 clients stay installed**: clients cannot be told to uninstall, and there is no signed revocation list yet (see
 [Security](concepts/security.md)). The files stay in the registry, so a withdrawn version can be released again.
+
+## The registry landing page
+
+`http://<registry>/` is a small static page (`deploy/landing/`, mounted read-only into the registry container, never part of
+`registry-data`). It lists the plugins from `index.json` with **search** (name, id, description, author), **sort** (name, recently updated,
+most used), a **Featured** plugin pinned first, per-plugin **client counts**, a **Source and feedback** link, a **Nominate a plugin** link,
+and downloads. Everything read from the registry is shown as text only.
+
+Settings are in `deploy/landing/landing.json` (edit, then refresh the page; no restart): `pinned` (plugin ids shown first, in order;
+default `onprem-marketplace`), `sourceBase` (https address that `owner/name` is appended to for the source link; omit for none), `nominateUrl`. The Get started tab also reads `keyHelp`, `keyUrl`, `contact` and `toolHint`: the sentence about where to
+save `om.exe`. The default says "your Downloads folder"; set `toolHint` if your site blocks programs there (for example to name
+an approved folder), so no site-specific location needs to live in the public repository.
+
+- **Client counts** come from `stats.json` (see Client activity): distinct clients that fetched the plugin in the window, counted from
+  downloads, not from use, with small counts left out. "Most used" is hidden when there are no stats. There are no star ratings: clients
+  report nothing back to the registry, and adding a write path from every client would be a new trust surface. Feedback goes to the plugin's
+  repository through the source link.
+- **Downloads** (for example `om.exe`) appear when `downloads/downloads.json` exists in the registry. Publish from the host (the registry
+  folder is a host folder), after `npm run build:exe`:
+  `node packages/sync/dist/cli.js publish-download dist/om.exe --version 0.2.0 --registry registry-data --note "Windows x64"`.
+  It copies the file into `downloads/` and records its size and SHA-256, shown on the page. This is not a signed channel (a client that has not
+  been set up yet cannot verify anything), so give people the SHA-256 by a second route if that matters.
 
 ## Nominating and adding plugin repositories
 

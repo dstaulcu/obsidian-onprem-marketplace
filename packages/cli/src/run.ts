@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { compareSemver, createRegistryClient, isSafeVersion, isValidPluginId, sha256Hex, type RegistryClient, type Trust, type TrustMode } from "@om/shared";
 import { transport } from "./transport";
+import { fetchPublicKey, isValidKey, keyFingerprint, showFingerprint } from "./key";
 import { addEnabled, discoverVaults, ensureVault, installFiles, listInstalled, mergeDataJson, readInstalledFile, readUserConfig, resolveVault, userConfigPath, writeUserConfig } from "./vault";
 
 export interface Io { log(s: string): void; err(s: string): void }
@@ -13,7 +14,10 @@ usage: om <command> [options]
   init         save settings so later commands need fewer flags (no network, no vault changes):
                [--registry <url>] [--key <file|base64>] [--mode <mode>]
                [--vault <path|name> | --all-vaults | --clear-vault]
-  settings     show the saved settings and what they resolve to
+               With --registry and no --key (and none saved), init fetches <registry>/public-key.txt, pins it and
+               prints its fingerprint. A saved key is never replaced unless you pass --fetch-key.
+  fingerprint  [key-file]   show the SHA-256 fingerprint of a key (default: the key in effect)
+  settings    show the saved settings and what they resolve to
   vaults       list the vaults Obsidian knows (use a name or id as --vault)
   list         [--registry <url>] [--key <file|base64>]
   install      <id[@version]>... [--vault <path|name> | --all-vaults] [--create]
@@ -45,7 +49,7 @@ common: --registry <url> (env OM_REGISTRY)  --key <file|base64> (env OM_PUBLIC_K
         --json  --config <file> (default om.config.json beside the program)
 exit status is non-zero if any step failed.`;
 
-const BOOL = new Set(["json", "force", "create", "require-review-pass", "help", "all-vaults", "clear-vault"]);
+const BOOL = new Set(["json", "force", "fetch-key", "create", "require-review-pass", "help", "all-vaults", "clear-vault"]);
 interface Args { cmd: string; pos: string[]; flags: Record<string, string | true> }
 
 export function parseArgs(argv: string[]): Args {
@@ -128,10 +132,33 @@ export async function run(argv: string[], io: Io, ctx: Env): Promise<number> {
         if (flags["clear-vault"] === true) delete next.vault;
         else if (flags["all-vaults"] === true || str("vault")?.toLowerCase() === "all") next.vault = "all";
         else if (str("vault")) next.vault = await resolveVault(str("vault")!, ctx.env);
-        if (JSON.stringify(next) === JSON.stringify(saved) && !flags["clear-vault"]) throw new Error("nothing to save: pass --registry, --key, --mode and/or --vault <path|name> | --all-vaults (see `om help`)");
+        if (JSON.stringify(next) === JSON.stringify(saved) && !flags["clear-vault"] && !flags["fetch-key"] && !(str("registry") && !saved.publicKey && !str("key") && (next.trustMode ?? "require-signed") !== "off"))
+          throw new Error("nothing to save: pass --registry, --key, --mode and/or --vault <path|name> | --all-vaults (see `om help`)");
+        // No key given and none saved: fetch the registry's public key and pin it (trust on first use). A saved key is never
+        // replaced unless --fetch-key is passed, so a registry that changes its key later cannot swap it under existing users.
+        const wantFetch = flags["fetch-key"] === true || (!!str("registry") && !str("key") && !saved.publicKey && (next.trustMode ?? "require-signed") !== "off");
+        let fetchNote: Result | undefined;
+        if (wantFetch) {
+          try {
+            if (!next.registry) throw new Error("--fetch-key needs a registry: pass --registry <url>");
+            const f = await fetchPublicKey(next.registry, transport);
+            next.publicKey = f.key;
+            const insecure = /^http:\/\//i.test(next.registry) ? " This registry address is not https, so the key was not protected in transit." : "";
+            fetchNote = { ok: true, message: `pinned the public key from ${f.from}\n  fingerprint (SHA-256): ${showFingerprint(f.fingerprint)}\n  If you want to be sure it is the right key, compare this with a fingerprint your admins gave you by another route (om fingerprint shows it again).${insecure}`, fingerprint: f.fingerprint };
+          } catch (e) { fetchNote = { ok: false, message: `could not fetch the public key: ${(e as Error).message}\n  Settings were saved without a key. Run init again once the marketplace is reachable, or pass --key <file>.` }; }
+        }
         const file = await writeUserConfig(ctx.env, next);
         results.push({ ok: true, message: `saved to ${file}` });
+        if (fetchNote) results.push(fetchNote);
         results.push(...describeSettings(next));
+        break;
+      }
+      case "fingerprint": {
+        const k = pos[0] ? await readKey(pos[0]) : publicKey;
+        if (!k) throw new Error("usage: om fingerprint [key-file]  (no file: shows the key that is in effect)");
+        if (!(await isValidKey(k))) throw new Error("that is not a valid public key");
+        const fp = await keyFingerprint(k);
+        results.push({ ok: true, message: `SHA-256 fingerprint: ${showFingerprint(fp)}`, fingerprint: fp });
         break;
       }
       case "settings": {

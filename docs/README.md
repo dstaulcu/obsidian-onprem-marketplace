@@ -33,7 +33,8 @@ For scripted setup (for example from a vault quickstart), `om` installs and chec
 
 ```
 om vaults                                      # vaults Obsidian knows (use a name or id as --vault)
-om init --registry URL --key public-key.txt --mode require-signed --vault Personal   # save settings once (or --all-vaults)
+om init --registry URL --vault Personal   # save settings once (or --all-vaults); fetches and pins URL/public-key.txt, prints its fingerprint
+# or pin a key you got another way: om init --registry URL --key public-key.txt --vault Personal
 om settings                                    # show what is saved and what is in effect
 om marketplace                                 # install the marketplace plugin and point it at the registry
 om install hello-notes other-plugin@1.2.0      # to the default vault; add --vault V or --all-vaults

@@ -59,6 +59,7 @@ services:
       - ./registry-data:/usr/share/nginx/html:ro
       - ./deploy/nginx-om.conf:/etc/nginx/conf.d/default.conf:ro
       - ./deploy/landing:/usr/share/nginx/landing:ro
+      - ./config/public-key.txt:/usr/share/nginx/keys/public-key.txt:ro
       - logs:/var/log/om
     read_only: true
     tmpfs: ["/var/cache/nginx", "/var/run", "/tmp"]

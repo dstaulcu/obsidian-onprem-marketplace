@@ -6,10 +6,10 @@
 export const INDEX_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Registry admin</title><link rel="stylesheet" href="/app.css"></head>
+<title>Marketplace admin</title><link rel="stylesheet" href="/app.css"></head>
 <body>
 <header class="top">
-  <div class="brand"><span class="logo" aria-hidden="true"></span><h1>Registry admin</h1></div>
+  <div class="brand"><span class="logo" aria-hidden="true"></span><h1>Marketplace admin</h1></div>
   <span class="spacer"></span>
   <span id="who" class="who" hidden></span>
   <button id="theme" class="btn ghost" type="button" title="Switch between automatic, light and dark">Theme: auto</button>
@@ -336,7 +336,7 @@ function issueLink(p, v) {
   const title = "Security review of " + p.id + " " + v.version + ": " + verdict;
   const NL = String.fromCharCode(10);
   const body = "An automated security review of " + p.id + "@" + v.version + " came back with: " + verdict + "." + NL + NL + (rep ? "Full report: " + rep + NL + NL : "") +
-    "Please look at the findings and let us know if they are expected or will be addressed." + NL + NL + "(Opened from the registry admin; edit this text before posting.)";
+    "Please look at the findings and let us know if they are expected or will be addressed." + NL + NL + "(Opened from the marketplace admin; edit this text before posting.)";
   const a = h("a", "issuelink", "Report issue"); a.href = base.replace(/[/]+$/, "") + "/" + p.repo + "/issues/new?title=" + encodeURIComponent(title) + "&body=" + encodeURIComponent(body);
   a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = "Open a prefilled issue on " + p.repo + " (you review and post it yourself)";
   return a;

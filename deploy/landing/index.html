@@ -1,19 +1,53 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Plugin registry</title><link rel="stylesheet" href="/landing.css"></head>
+<title>Plugin marketplace</title><link rel="stylesheet" href="/landing.css"></head>
 <body><main>
-<h1>Plugin registry</h1>
-<p class="muted">This is a read-only registry of approved Obsidian plugins. It is meant to be used by the <code>om</code> command and the On-Prem Marketplace plugin, not browsed by hand.</p>
-<h2>Plugins</h2>
-<ul id="list"><li class="muted">Loading...</li></ul>
-<div id="nominate" hidden><h2>Need a plugin that is not here?</h2>
-<p><a id="nominatelink" rel="noopener noreferrer" target="_blank" href="#">Nominate a plugin</a> <span class="muted">(opens a request on GitHub; an admin reviews it)</span></p></div>
-<h2>For clients</h2>
-<p>Point <code>om</code> or the plugin at this address. The registry files are:</p>
-<ul>
-<li><a href="/index.json">index.json</a>: the latest version of each plugin</li>
-<li><code>/plugins/&lt;id&gt;/versions.json</code>: every version, with hashes</li>
-</ul>
-<p class="muted small">Nothing here can change anything. Approvals are signed separately and checked by the client.</p>
+<header class="head">
+  <div><h1>Plugin marketplace</h1>
+  <p class="muted">Approved Obsidian plugins, installed with the <strong>On-Prem Marketplace</strong> plugin in Obsidian.</p></div>
+  <div class="actions">
+    <a id="nominatetop" class="btn primary" rel="noopener noreferrer" target="_blank" href="#" hidden>Nominate a plugin</a>
+  </div>
+</header>
+
+<div class="tabs" role="tablist" aria-label="Sections">
+  <button id="tab-plugins" class="tab" role="tab" type="button" aria-controls="panel-plugins" aria-selected="false" data-tab="plugins">Plugins <span id="tabcount" class="pill" hidden></span></button>
+  <button id="tab-start" class="tab" role="tab" type="button" aria-controls="panel-start" aria-selected="false" data-tab="start">Get started</button>
+</div>
+
+<section id="panel-start" class="panel" role="tabpanel" aria-labelledby="tab-start" hidden>
+<p class="muted">Plugins are installed from inside Obsidian by the <strong>On-Prem Marketplace</strong> plugin. If you don't have it yet, set it up once with the <code>om</code> tool (Windows).</p>
+<ol class="steps">
+<li><strong>Download <code>om.exe</code></strong> and save it in a folder you can write to and run programs from. <span id="toolhint">Your Downloads folder is fine unless your computer blocks programs there.</span> It needs no installation.
+  <div id="downloads" hidden><ul id="downloadlist" class="plain"></ul>
+  <p class="muted small" id="tool">Compare the SHA-256 after downloading (ask an admin for it by another route if you want to be sure).</p></div>
+  <p id="nodownload" class="muted small">The download is not published yet. Ask the marketplace admins for <code>om.exe</code>.</p></li>
+<li><strong>Open PowerShell in the folder with <code>om.exe</code>.</strong> In File Explorer, open that folder, click the address bar, type <code>powershell</code> and press Enter. Then run these three commands. Replace <code>My Vault</code> with the name <code>om vaults</code> shows for your vault.
+<div class="cmd"><pre id="cmds">.\om.exe vaults
+.\om.exe init --registry <span class="origin"></span> --vault "My Vault"
+.\om.exe marketplace</pre><button id="copycmds" class="btn small" type="button">Copy</button></div>
+  <div class="muted small">The second command saves the address and the marketplace's public key (the key your computer uses to check that an approval is genuine) and prints the key's fingerprint. <span id="keyhelp">If you want to be certain it is the right key, compare the fingerprint with one your admins give you.</span> <a id="keylink" rel="noopener noreferrer" target="_blank" href="#" hidden>Where to find it</a></div></li>
+<li><strong>In Obsidian</strong>, open Settings, then Community plugins, turn off Restricted mode, and enable <strong>On-Prem Marketplace</strong>. Click the store icon in the left ribbon (or run the command <em>Browse internal plugins</em>) to install, update or review plugins from now on.</li>
+</ol>
+<p class="muted small">Already have the On-Prem Marketplace plugin? Just open it from the ribbon. <code>om.exe</code> is for Windows; on another system ask your admins for the setup script. Something not working? <span id="contact">Ask the marketplace admins.</span></p>
+<p><button id="gotoplugins" class="btn" type="button">Browse the plugins</button></p>
+</section>
+
+<section id="panel-plugins" class="panel" role="tabpanel" aria-labelledby="tab-plugins" hidden>
+<div id="controls" class="controls" hidden>
+  <input id="q" type="search" placeholder="Search by name or description" aria-label="Search plugins by name or description" autocomplete="off">
+  <label class="muted small" for="sort">Sort</label>
+  <select id="sort" aria-label="Sort plugins">
+    <option value="name">Name (A to Z)</option>
+    <option value="updated">Recently updated</option>
+    <option value="installs">Most used</option>
+  </select>
+  <span id="count" class="muted small" aria-live="polite"></span>
+</div>
+<ul id="list" class="plain"><li class="muted">Loading...</li></ul>
+<p id="statsnote" class="muted small" hidden></p>
+<p id="nominate" class="muted" hidden>Can't find what you need? <a id="nominatelink" rel="noopener noreferrer" target="_blank" href="#">Nominate a plugin</a>.</p>
+</section>
+
 </main><script src="/landing.js"></script></body></html>

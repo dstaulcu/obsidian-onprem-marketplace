@@ -27,7 +27,7 @@ export default class InternalMarketplace extends Plugin {
       if (updates.length) new Notice(`On-Prem Marketplace: updates for ${updates.map((u) => u.name).join(", ")}. Run "Update all marketplace plugins".`, 10000);
       else if (verbose) new Notice("All internal plugins are up to date.");
     } catch (e) {
-      if (verbose) new Notice(`Registry unreachable: ${(e as Error).message}`);
+      if (verbose) new Notice(`Marketplace unreachable: ${(e as Error).message}`);
     }
   }
 
@@ -45,7 +45,7 @@ export default class InternalMarketplace extends Plugin {
         catch (e) { new Notice(`Failed to update ${u.name}: ${(e as Error).message}`, 10000); }
       }
       if (!updates.length) new Notice("All internal plugins are up to date.");
-    } catch (e) { new Notice(`Registry unreachable: ${(e as Error).message}`); }
+    } catch (e) { new Notice(`Marketplace unreachable: ${(e as Error).message}`); }
   }
 
   get trust(): Trust { return { mode: this.settings.trustMode, publicKey: this.settings.publicKey, requireReviewPass: this.settings.requireReviewPass }; }
@@ -82,7 +82,7 @@ class MarketplaceModal extends Modal {
       }
       this.render();
     }
-    catch (e) { this.listEl.setText(`Could not reach registry: ${(e as Error).message}`); }
+    catch (e) { this.listEl.setText(`Could not reach the marketplace: ${(e as Error).message}`); }
   }
 
   private listEl!: HTMLElement;
@@ -139,7 +139,7 @@ class SettingsTab extends PluginSettingTab {
   constructor(app: App, private plugin: InternalMarketplace) { super(app, plugin); }
   display() {
     this.containerEl.empty();
-    new Setting(this.containerEl).setName("Registry URL").setDesc("Base URL of the internal registry (contains index.json).")
+    new Setting(this.containerEl).setName("Marketplace address").setDesc("Base URL of the internal marketplace (the address that serves index.json).")
       .addText((t) => t.setValue(this.plugin.settings.registryUrl).onChange(async (v) => { this.plugin.settings.registryUrl = v.trim(); await this.plugin.saveSettings(); }));
     new Setting(this.containerEl).setName("Update check interval (minutes)")
       .addText((t) => t.setValue(String(this.plugin.settings.checkIntervalMinutes)).onChange(async (v) => { this.plugin.settings.checkIntervalMinutes = Number(v) || DEFAULTS.checkIntervalMinutes; await this.plugin.saveSettings(); }));
@@ -148,7 +148,7 @@ class SettingsTab extends PluginSettingTab {
       .addDropdown((d) => d.addOptions({ "off": "off", "warn": "warn", "require-signed": "require-signed" })
         .setValue(this.plugin.settings.trustMode)
         .onChange(async (v) => { this.plugin.settings.trustMode = v as TrustMode; await this.plugin.saveSettings(); }));
-    new Setting(this.containerEl).setName("Pinned public key").setDesc("Base64 SPKI key from public-key.txt. Set at bootstrap; never fetched from the registry.")
+    new Setting(this.containerEl).setName("Pinned public key").setDesc("Base64 SPKI key from public-key.txt. Set at bootstrap; never fetched from the marketplace.")
       .addTextArea((t) => t.setValue(this.plugin.settings.publicKey).onChange(async (v) => { this.plugin.settings.publicKey = v.trim(); await this.plugin.saveSettings(); }));
     new Setting(this.containerEl).setName("Hide unapproved plugins")
       .setDesc("In the browser, hide plugins whose latest version is not approved (already-installed ones stay visible).")

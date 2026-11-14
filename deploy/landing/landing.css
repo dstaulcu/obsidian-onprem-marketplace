@@ -1,9 +1,34 @@
-:root{color-scheme:light dark;--bg:#f6f7f9;--text:#1b1f27;--muted:#5d6676;--border:#d9dde4;--card:#fff;--accent:#3452d1}
-@media (prefers-color-scheme:dark){:root{--bg:#0e1117;--text:#e6e9ef;--muted:#99a2b2;--border:#2a3140;--card:#161b24;--accent:#8097ff}}
+:root{color-scheme:light dark;--bg:#f6f7f9;--text:#1b1f27;--muted:#5d6676;--border:#d9dde4;--card:#fff;--accent:#3452d1;--accent-soft:#e8ecfd}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1117;--text:#e6e9ef;--muted:#99a2b2;--border:#2a3140;--card:#161b24;--accent:#8097ff;--accent-soft:#222a45}}
+[hidden]{display:none!important}
+*{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-main{max-width:44rem;margin:0 auto;padding:2rem 1rem}
+main{max-width:52rem;margin:0 auto;padding:1.5rem 1rem 3rem}
 h1{font-size:1.5rem;margin:0 0 .5rem}h2{font-size:1.05rem;margin:1.8rem 0 .5rem}
 a{color:var(--accent)}ul{padding-left:1.1rem}.muted{color:var(--muted)}.small{font-size:12px}
-code{font:12.5px ui-monospace,Consolas,monospace;background:var(--card);border:1px solid var(--border);border-radius:4px;padding:0 .3rem}
-#list{list-style:none;padding:0}#list li{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.7rem .9rem;margin:.5rem 0}
-#list .name{font-weight:600}#list .ver{float:right;color:var(--muted);font:12.5px ui-monospace,Consolas,monospace}
+code{font:12.5px ui-monospace,Consolas,monospace;background:var(--card);border:1px solid var(--border);border-radius:4px;padding:0 .3rem;overflow-wrap:anywhere}
+ul.plain{list-style:none;padding:0;margin:0}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.55rem .85rem;margin:.4rem 0}
+.card.pinned{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.row{display:flex;justify-content:space-between;gap:.8rem;align-items:baseline}
+.name{font-weight:600}.ver{color:var(--muted);font:12.5px ui-monospace,Consolas,monospace;white-space:nowrap}
+.tag{margin-left:.5rem;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:.05rem .5rem;vertical-align:middle}
+.desc{margin:.1rem 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.src,.dl{display:inline-block;margin-top:.35rem;font-size:13px}
+.dl{background:var(--accent);color:var(--bg);text-decoration:none;border-radius:8px;padding:.35rem .8rem;font-weight:600;margin:.5rem 0}
+.head{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;flex-wrap:wrap;margin-bottom:.8rem}.head p{margin:.2rem 0 0;max-width:34rem}
+.actions{display:flex;gap:.5rem;flex-wrap:wrap}
+.btn{display:inline-block;text-decoration:none;color:var(--text);background:var(--card);border:1px solid var(--border);border-radius:8px;padding:.45rem .9rem;font-weight:600;font-size:14px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.controls{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin:.4rem 0;position:sticky;top:0;z-index:2;background:var(--bg);padding:.4rem 0 .5rem;border-bottom:1px solid var(--border)}
+.card.empty{text-align:center;color:var(--muted)}
+.foot{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem}
+.tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--border);margin:.4rem 0 .8rem}
+.tab{font:inherit;font-weight:600;color:var(--muted);background:none;border:0;border-bottom:2px solid transparent;padding:.55rem .9rem;cursor:pointer;margin-bottom:-1px}
+.tab:hover{color:var(--text)}.tab[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent)}
+.pill{font-size:11px;font-weight:600;background:var(--accent-soft);color:var(--accent);border-radius:999px;padding:.02rem .5rem;margin-left:.3rem}
+.steps{padding-left:1.3rem}.steps li{margin:.7rem 0}
+.cmd{position:relative;margin:.5rem 0}.cmd pre{margin:0;padding:.7rem 4.5rem .7rem .8rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;font:12.5px/1.6 ui-monospace,Consolas,monospace;overflow-x:auto;white-space:pre}
+.cmd .btn{position:absolute;top:.4rem;right:.4rem;cursor:pointer}.btn.small{padding:.2rem .6rem;font-size:12px}
+input[type=search],select{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--border);border-radius:8px;padding:.45rem .65rem}
+input[type=search]{flex:1 1 16rem;min-width:12rem}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}

@@ -248,6 +248,49 @@ describe("om init (saved settings) and --all-vaults", () => {
     expect(await exists(join(vault, ".obsidian/plugins/demo/main.js"))).toBe(true);
   });
 
+  it("init fetches and pins the registry's public key when none is given, and never replaces a saved one", async () => {
+    const reg = await makeRegistry("demo", ["1.0.0"], ["1.0.0"]);
+    const U = await userCfg();
+    const vault = await newVault();
+    // no key published yet: settings are saved, the failure is reported
+    const none = await om(["init", "--registry", reg, "--vault", vault], { OM_USER_CONFIG: U });
+    expect(none.code).toBe(1);
+    expect(none.err).toMatch(/could not fetch the public key/);
+    expect(JSON.parse(await readFile(U, "utf8")).registry).toBe(reg);
+    // a published key is pinned and its fingerprint shown
+    await writeFile(join(reg, "public-key.txt"), keys.publicSpkiB64 + "\n");
+    const ok = await om(["init", "--registry", reg], { OM_USER_CONFIG: U });
+    expect(ok.code).toBe(0);
+    expect(ok.out).toMatch(/fingerprint \(SHA-256\): [0-9a-f]{8}( [0-9a-f]{8}){7}/);
+    expect(JSON.parse(await readFile(U, "utf8")).publicKey).toBe(keys.publicSpkiB64);
+    expect((await om(["install", "demo"], { OM_USER_CONFIG: U })).code).toBe(0); // the pinned key is enough
+    // the registry later offers a different key: an existing pin is not replaced...
+    const other = generateKeys();
+    await writeFile(join(reg, "public-key.txt"), other.publicSpkiB64);
+    await om(["init", "--registry", reg], { OM_USER_CONFIG: U });
+    expect(JSON.parse(await readFile(U, "utf8")).publicKey).toBe(keys.publicSpkiB64);
+    // ...unless the user asks
+    await om(["init", "--fetch-key"], { OM_USER_CONFIG: U });
+    expect(JSON.parse(await readFile(U, "utf8")).publicKey).toBe(other.publicSpkiB64);
+    // junk and oversized answers are refused
+    await writeFile(join(reg, "public-key.txt"), "<html>not a key</html>");
+    const bad = await om(["init", "--fetch-key"], { OM_USER_CONFIG: U });
+    expect(bad.code).toBe(1);
+    expect(JSON.parse(await readFile(U, "utf8")).publicKey).toBe(other.publicSpkiB64);
+    await writeFile(join(reg, "public-key.txt"), "A".repeat(5000));
+    expect((await om(["init", "--fetch-key"], { OM_USER_CONFIG: U })).err).toMatch(/too large/);
+  });
+
+  it("fingerprint prints a stable hash of a key", async () => {
+    const f = join(await mkdtemp(join(tmpdir(), "om-fp-")), "k.txt");
+    await writeFile(f, keys.publicSpkiB64);
+    const a = await om(["fingerprint", f, "--json"]);
+    expect(JSON.parse(a.out).results[0].fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect((await om(["fingerprint", f])).out).toBe(a.out ? (await om(["fingerprint", f])).out : "");
+    await writeFile(f, "nope");
+    expect((await om(["fingerprint", f])).code).toBe(1);
+  });
+
   it("init needs something to save; flags beat saved settings; clear-vault removes the default", async () => {
     const U = await userCfg();
     const e = await om(["init"], { OM_USER_CONFIG: U });
@@ -256,8 +299,8 @@ describe("om init (saved settings) and --all-vaults", () => {
     expect((await om(["init", "--mode", "bogus"], { OM_USER_CONFIG: U })).code).toBe(1);
     const a = await newVault(), b = await newVault();
     await om(["init", "--vault", a], { OM_USER_CONFIG: U });
-    await om(["init", "--registry", "x"], { OM_USER_CONFIG: U }); // merges, keeps vault
-    expect(JSON.parse(await readFile(U, "utf8"))).toEqual({ vault: a, registry: "x" });
+    await om(["init", "--registry", "x", "--mode", "off"], { OM_USER_CONFIG: U }); // merges, keeps vault
+    expect(JSON.parse(await readFile(U, "utf8"))).toEqual({ vault: a, registry: "x", trustMode: "off" });
     const reg = await makeRegistry("demo", ["1.0.0"], ["1.0.0"]);
     await om(["install", "demo", ...base(reg, b)], { OM_USER_CONFIG: U }); // --vault beats the saved one
     expect(await exists(join(b, ".obsidian/plugins/demo"))).toBe(true);
@@ -286,7 +329,7 @@ describe("om init (saved settings) and --all-vaults", () => {
 
   it("settings reports saved and effective values", async () => {
     const U = await userCfg();
-    await om(["init", "--registry", "http://r", "--all-vaults"], { OM_USER_CONFIG: U });
+    await om(["init", "--registry", "http://r", "--mode", "off", "--all-vaults"], { OM_USER_CONFIG: U });
     const r = await om(["settings"], { OM_USER_CONFIG: U, OM_TRUST_MODE: "warn" });
     expect(r.out).toMatch(/default vault: all/);
     expect(r.out).toMatch(/mode: warn/);
