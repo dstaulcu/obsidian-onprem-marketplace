@@ -21,6 +21,18 @@ function mock(tags: string[], manifestVer: (t: string) => string = (t) => t): Fe
 }
 
 describe("sync", () => {
+  it("traces what it checked, added and found already present", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "reg-"));
+    const cfg = { githubApiBase: "http://gh/api", outDir, repos: [{ repo: "o/r" }] };
+    const first: string[] = [], second: string[] = [];
+    await syncRegistry(cfg, mock(["1.0.0"]), (l) => first.push(l));
+    await syncRegistry(cfg, mock(["1.0.0"]), (l) => second.push(l));
+    const a = first.join(" | "), b = second.join(" | ");
+    expect(a).toContain("o/r: 1 release(s) on GitHub");
+    expect(a).toContain("+ demo@1.0.0: downloaded main.js");
+    expect(a).toContain("index.json rebuilt: 1 plugin(s) listed");
+    expect(b).toContain("= demo@1.0.0: already mirrored");
+  });
   it("adds versions, is idempotent, builds index", async () => {
     const outDir = await mkdtemp(join(tmpdir(), "reg-"));
     const cfg = { githubApiBase: "http://gh/api", outDir, repos: [{ repo: "o/r" }] };

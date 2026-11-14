@@ -23,6 +23,7 @@
     "maxFailures": 5,
     "lockoutMinutes": 15
   },
+  "reviewQueue": "/queue",
   "auditLog": "/audit/admin-audit.jsonl",
   "accessLog": "/logs/access.log",
   "networks": [

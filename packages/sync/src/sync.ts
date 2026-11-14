@@ -67,7 +67,8 @@ async function getBytes(f: Fetcher, url: string): Promise<Uint8Array> {
 
 export interface SyncResult { added: string[]; skipped: string[]; errors: string[]; addedVersions: { id: string; version: string }[]; }
 
-export async function syncRegistry(cfg: Config, f: Fetcher): Promise<SyncResult> {
+/** `log` receives a human-readable trace (what was checked, added, already present, left out) for the admin job view. */
+export async function syncRegistry(cfg: Config, f: Fetcher, log: (line: string) => void = () => {}): Promise<SyncResult> {
   const res: SyncResult = { added: [], skipped: [], errors: [], addedVersions: [] };
   const pluginsDir = join(cfg.outDir, "plugins");
   await mkdir(pluginsDir, { recursive: true });
@@ -78,11 +79,13 @@ export async function syncRegistry(cfg: Config, f: Fetcher): Promise<SyncResult>
       const releases = await getJson<Release[]>(f, `${cfg.githubApiBase}/repos/${rc.repo}/releases?per_page=100`);
       const max = rc.maxVersions ?? cfg.maxVersions;
       let taken = 0;
+      const ignored = releases.filter((r) => r.draft || r.prerelease).length;
+      log(`${rc.repo}: ${releases.length} release(s) on GitHub` + (ignored ? `, ${ignored} pre-release/draft ignored` : "") + (max ? `, newest ${max} considered` : ""));
       for (const rel of releases) {
         if (rel.draft || rel.prerelease) continue;
         const tagVer = rel.tag_name.replace(/^v/, "");
-        if (rc.pinVersions && !rc.pinVersions.includes(tagVer)) continue;
-        if (max && taken++ >= max) break;
+        if (rc.pinVersions && !rc.pinVersions.includes(tagVer)) { log(`  - ${rel.tag_name}: not in pinVersions, left out`); continue; }
+        if (max && taken++ >= max) { log(`  - older releases from ${rel.tag_name} on are beyond maxVersions (${max}), left out`); break; }
         const label = `${rc.repo}@${rel.tag_name}`;
         try {
           const byName = new Map(rel.assets.map((a) => [a.name, a]));
@@ -96,7 +99,7 @@ export async function syncRegistry(cfg: Config, f: Fetcher): Promise<SyncResult>
           if (manifest.version !== tagVer) throw new Error(`tag ${rel.tag_name} != manifest version ${manifest.version}`);
           repoOfPlugin[manifest.id] = rc.repo;
           const vdir = join(pluginsDir, manifest.id, manifest.version);
-          if (await exists(join(vdir, "manifest.json"))) { res.skipped.push(label); continue; }
+          if (await exists(join(vdir, "manifest.json"))) { res.skipped.push(label); log(`  = ${manifest.id}@${manifest.version}: already mirrored`); continue; }
           const mainBytes = await getBytes(f, jsAsset.url);
           const sAsset = byName.get("styles.css");
           const stylesBytes = sAsset ? await getBytes(f, sAsset.url) : undefined;
@@ -112,8 +115,9 @@ export async function syncRegistry(cfg: Config, f: Fetcher): Promise<SyncResult>
           };
           await addEntry(join(pluginsDir, manifest.id), entry, cfg.publishPolicy ?? "all");
           res.added.push(label);
+          log(`  + ${manifest.id}@${manifest.version}: downloaded main.js (${(mainBytes.length / 1024).toFixed(1)} KB)` + (stylesBytes ? ", styles.css" : "") + ", manifest.json; hashes recorded");
           res.addedVersions.push({ id: manifest.id, version: manifest.version });
-        } catch (e) { if (e instanceof RateLimitError) throw e; res.errors.push(`${label}: ${(e as Error).message}`); }
+        } catch (e) { if (e instanceof RateLimitError) throw e; res.errors.push(`${label}: ${(e as Error).message}`); log(`  ! ${label}: ${(e as Error).message}`); }
       }
     } catch (e) {
       res.errors.push(`${rc.repo}: ${(e as Error).message}`);
@@ -121,6 +125,7 @@ export async function syncRegistry(cfg: Config, f: Fetcher): Promise<SyncResult>
     }
   }
   await rebuildIndex(cfg.outDir, repoOfPlugin);
+  try { log(`index.json rebuilt: ${(JSON.parse(await readFile(join(cfg.outDir, "index.json"), "utf8")) as unknown[]).length} plugin(s) listed`); } catch { /* summary only */ }
   return res;
 }
 

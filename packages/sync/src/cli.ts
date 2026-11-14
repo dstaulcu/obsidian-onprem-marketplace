@@ -5,6 +5,8 @@ import { approveVersion, generateKeys } from "./signing";
 import { type PublishPolicy } from "./catalog";
 import { loadRubric, renderRubricDoc, testRule } from "./rubric";
 import { allVersions, publishHeld, runReviews, runSync } from "./jobs";
+import { makeReviewer } from "./reviewers";
+import { runWorker, validateReviewQueue } from "./reviewqueue";
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -49,6 +51,29 @@ if (cmd === "keygen") {
   else { const [id, version] = (rest[0] ?? "").split("@"); if (!id || !version) { console.error("usage: review <id@version | --all>"); process.exit(2); } targets = [{ id, version }]; }
   await runReviews(cfg, targets);
   await publishHeld(cfg.outDir, cfg.publishPolicy ?? "all");
+} else if (cmd === "review-worker") {
+  // om-sync review-worker --queue /queue [--config registry.config.json]
+  // The separate reviewer container: answers prompts the admin queues. It holds the model credentials and sees no registry files.
+  const flag = (n: string, d?: string) => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : d; };
+  const queue = flag("queue");
+  if (!queue) { console.error("usage: review-worker --queue <dir> [--config registry.config.json]"); process.exit(2); }
+  const cfg = JSON.parse(await readFile(flag("config", "registry.config.json")!, "utf8")) as Config;
+  const bad = validateReviewQueue(cfg.review);
+  if (bad.length) { bad.forEach((b) => console.error("review-worker: " + b)); process.exit(2); }
+  const rc = cfg.review!;
+  // Claude Code needs a writable home; in the container the root file system is read-only, so HOME points at a tmpfs.
+  if (process.env.HOME) await mkdir(process.env.HOME, { recursive: true });
+  const inner = makeReviewer(rc);
+  const needsKey = (rc.provider ?? "claude-code") === "claude-code";
+  const reviewer: typeof inner = async (prompt, ctx) => {
+    if (needsKey && !process.env.ANTHROPIC_API_KEY) throw new Error("the reviewer container has no ANTHROPIC_API_KEY");
+    return inner(prompt, ctx);
+  };
+  const stop = { now: false };
+  for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => { stop.now = true; });
+  console.log(`review-worker: queue ${queue}, provider ${rc.provider ?? "claude-code"}, model ${rc.model ?? "(default)"}`);
+  if (needsKey && !process.env.ANTHROPIC_API_KEY) console.warn("review-worker: ANTHROPIC_API_KEY is not set; every request will be answered with an error");
+  await runWorker(queue, reviewer, stop, (l) => console.log(l));
 } else {
   const cfgPath = cmd ?? "registry.config.json";
   const cfg = JSON.parse(await readFile(cfgPath, "utf8")) as Config;

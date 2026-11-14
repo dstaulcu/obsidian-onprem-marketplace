@@ -29,7 +29,7 @@ export type Reviewer = ((prompt: string, ctx?: { stageDir?: string }) => Promise
 /** Secret-looking text in model output means a hostile plugin may have steered a tool-enabled harness into reading it. */
 export const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk-ant-[A-Za-z0-9_-]{10,}|\bgh[pousr]_[A-Za-z0-9]{20,}|\bAKIA[0-9A-Z]{16}\b|\bBearer\s+eyJ[A-Za-z0-9_-]{10,}/;
 
-export interface ReviewOptions { rubric: Rubric; privatePem?: string; model?: string }
+export interface ReviewOptions { rubric: Rubric; privatePem?: string; model?: string; /** Review again even if an up-to-date review exists (costs a model call). */ force?: boolean }
 export type ReviewOutcome = { status: "reviewed" | "skipped"; verdict: Verdict; id: string; version: string };
 
 const sha = (b: Uint8Array | string) => createHash("sha256").update(b).digest("hex");
@@ -179,7 +179,7 @@ export async function reviewVersion(outDir: string, id: string, version: string,
     try {
       const old = JSON.parse(await readFile(recPath, "utf8")) as ReviewRecord;
       const same = old.sha256.main === actual.main && old.sha256.manifest === actual.manifest && old.sha256.styles === actual.styles;
-      if (same && old.review.rubricVersion === rubric && (!opts.model || old.review.model === opts.model) && old.review.verdict !== "error")
+      if (same && old.review.rubricVersion === rubric && (!opts.model || old.review.model === opts.model) && old.review.verdict !== "error" && !opts.force)
         return { status: "skipped", verdict: old.review.verdict, id, version };
     } catch { /* unreadable record: review again */ }
   }

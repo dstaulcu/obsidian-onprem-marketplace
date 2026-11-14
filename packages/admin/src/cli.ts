@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Config } from "@om/sync/src/sync";
+import type { ReviewOpts } from "@om/sync/src/jobs";
+import { queueReviewer, validateReviewQueue } from "@om/sync/src/reviewqueue";
 import { LoginLimiter, setPassword } from "./auth/password";
 import { mtlsAuthenticator } from "./auth/mtls";
 import { SessionStore } from "./auth/session";
@@ -88,9 +90,17 @@ async function main() {
     const activity = cfg.accessLog ? new AccessProcessor({ logFile: cfg.accessLog, stateFile: join(stateDir, "activity.json"), networks: cfg.networks ?? [], basePath: cfg.basePath }) : undefined;
     const forwarder = await buildForwarder(cfg);
     const loadRc = async () => JSON.parse(await readFile(cfg.registryConfig, "utf8")) as Config;
+    // With a review queue, the model call happens in the separate reviewer container and never in this process.
+    let reviewOpts: ReviewOpts | undefined;
+    if (cfg.reviewQueue) {
+      const bad = validateReviewQueue((await loadRc()).review);
+      if (bad.length) { bad.forEach((b) => console.error("review queue: " + b)); return 1; }
+      const q = queueReviewer(cfg.reviewQueue);
+      reviewOpts = { reviewer: q, preflight: () => q.ready() };
+    }
     const server = await createAdminServer({
       cfg, publicKey, authenticators, activity, forwarder, jobs: new JobRunner(), audit: fileAudit(cfg.auditLog), secure: !!cfg.tls, env: process.env,
-      loadRegistryConfig: loadRc,
+      loadRegistryConfig: loadRc, reviewOpts,
       password: p ? {
         usersFile: p.usersFile,
         sessions: new SessionStore((p.idleMinutes ?? 30) * 60_000, (p.maxHours ?? 8) * 3_600_000),

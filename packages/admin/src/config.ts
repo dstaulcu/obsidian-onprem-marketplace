@@ -29,6 +29,12 @@ export interface AdminConfig {
   networks?: Network[];
   /** Counts-only stats.json written into the registry for the marketplace listing. Needs accessLog. */
   stats?: { publish?: boolean; windowDays?: number; minCount?: number };
+  /**
+   * Directory shared with the separate reviewer container (see docs/admin.md). When set, reviews are never run in this
+   * process: the prompt is queued, the reviewer container (which holds the model credentials) answers, and the answer is
+   * validated here exactly like a local one. Leave unset to review in-process (needs the provider's credentials here).
+   */
+  reviewQueue?: string;
   /** Stream events to Splunk HEC. The token comes from an env var or file, never from this config. */
   splunk?: SplunkConfig;
 }
@@ -44,6 +50,7 @@ export function validateConfig(c: AdminConfig): string[] {
   if (c.mtls && !c.mtls.allow?.length) e.push("mtls.allow is empty: no certificate would be authorised");
   if (c.password && !c.password.usersFile) e.push("password.usersFile is required");
   for (const n of c.networks ?? []) if (!validNetwork(n)) e.push(`networks: bad entry ${JSON.stringify(n)} (need an IPv4 "a.b.c.d/len" and a name)`);
+  if (c.reviewQueue !== undefined && (typeof c.reviewQueue !== "string" || !c.reviewQueue)) e.push("reviewQueue must be a directory path");
   if (c.stats?.publish && !c.accessLog) e.push("stats.publish needs accessLog");
   if (c.stats) {
     if (c.stats.windowDays !== undefined && !(c.stats.windowDays >= 1 && c.stats.windowDays <= 90)) e.push("stats.windowDays must be 1-90");

@@ -3,7 +3,7 @@ import { createServer as createHttps } from "node:https";
 import { readFile } from "node:fs/promises";
 import { isSafeVersion, isValidPluginId } from "@om/shared";
 import type { Config, Fetcher } from "@om/sync/src/sync";
-import { allVersions, publishHeld, runReviews, runSync } from "@om/sync/src/jobs";
+import { allVersions, publishHeld, runReviews, runSync, type ReviewOpts } from "@om/sync/src/jobs";
 import type { Audit } from "./audit";
 import type { AdminConfig } from "./config";
 import { Busy, JobRunner } from "./jobs";
@@ -19,6 +19,8 @@ import { APP_CSS, APP_JS, INDEX_HTML } from "./ui";
 export interface Deps {
   cfg: AdminConfig;
   loadRegistryConfig(): Promise<Config>;
+  /** Where reviews run (the queue to the reviewer container). Unset: in-process. */
+  reviewOpts?: ReviewOpts;
   publicKey: string;
   audit: Audit;
   authenticators: Authenticator[];
@@ -144,7 +146,7 @@ export function createHandler(d: Deps): RequestListener {
       if (method === "POST" && path === "/api/sync") {
         const rc = await d.loadRegistryConfig();
         const job = d.jobs.start("sync", who.name, async (log) => {
-          const r = await runSync(rc, log, d.env, d.fetcher);
+          const r = await runSync(rc, log, d.env, d.fetcher, d.reviewOpts);
           if (r.errors.length) throw new Error(`${r.errors.length} error(s) during sync`);
         });
         await d.audit.record(who.name, "sync.start", { job: job.id }, ip);
@@ -159,8 +161,11 @@ export function createHandler(d: Deps): RequestListener {
         if (body.all === true) targets = await allVersions(rc.outDir);
         else if (typeof body.id === "string" && typeof body.version === "string" && isValidPluginId(body.id) && isSafeVersion(body.version)) targets = [{ id: body.id, version: body.version }];
         else throw new HttpError(400, "send {\"all\":true} or {\"id\",\"version\"}");
+        // Fail fast and visibly when the reviewer container is down, instead of queueing work that would time out one version at a time.
+        const why = await d.reviewOpts?.preflight?.();
+        if (why) throw new HttpError(503, why);
         const job = d.jobs.start("review", who.name, async (log) => {
-          await runReviews(rc, targets, log, d.env);
+          await runReviews(rc, targets, log, d.env, { ...d.reviewOpts, force: body.all !== true && body.force === true });
           await publishHeld(rc.outDir, rc.publishPolicy ?? "all", log);
         });
         await d.audit.record(who.name, "review.start", { job: job.id, targets: body.all === true ? "all" : `${targets[0].id}@${targets[0].version}` }, ip);
