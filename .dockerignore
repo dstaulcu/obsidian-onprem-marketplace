@@ -9,3 +9,6 @@ keys
 .git
 registry-data
 config
+.env
+.env.*
+secrets

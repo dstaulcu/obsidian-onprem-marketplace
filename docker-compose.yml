@@ -7,16 +7,22 @@
 # (run on the host: /config is mounted read-only in the container)
 # On Linux hosts set OM_UID/OM_GID to your own ids (export OM_UID=$(id -u) OM_GID=$(id -g)) so the files the admin
 # writes into ./registry-data stay editable by you. Docker Desktop (Windows/macOS) does not need this.
+# Docker's own container output: cap it so it cannot fill the disk.
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
 services:
   # One-shot: make sure the admin's (unprivileged) user can write the data folders. Best effort: on Docker Desktop bind
   # mounts are already writable and chown may be refused, which is fine.
   init:
     image: busybox:stable
     user: "0"
-    command: ["sh", "-c", "chown ${OM_UID:-10001}:${OM_GID:-10001} /data /audit 2>/dev/null; chmod 755 /data /audit 2>/dev/null; exit 0"]
+    command: ["sh", "-c", "chown ${OM_UID:-10001}:${OM_GID:-10001} /data /audit /queue 2>/dev/null; chmod 755 /data /audit 2>/dev/null; chmod 750 /queue 2>/dev/null; exit 0"]
     volumes:
       - ./registry-data:/data
       - audit:/audit
+      - queue:/queue
     restart: "no"
 
   admin:
@@ -29,17 +35,19 @@ services:
     volumes:
       - ./registry-data:/data
       - audit:/audit
+      - queue:/queue
       - logs:/logs:ro
       - ./config:/config:ro
     environment:
       # Secrets for sync/review jobs. Prefer Docker secrets or your orchestrator's secret store in production.
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # No ANTHROPIC_API_KEY here on purpose: reviews run in the separate reviewer container (reviewQueue in admin.config.json).
       SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:-}
     read_only: true
     tmpfs: ["/tmp"]
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    logging: *logging
     restart: unless-stopped
 
   registry:
@@ -51,8 +59,56 @@ services:
       - logs:/var/log/om
     read_only: true
     tmpfs: ["/var/cache/nginx", "/var/run", "/tmp"]
+    logging: *logging
+    restart: unless-stopped
+
+  # The ONLY container with the Anthropic key. It answers review prompts the admin puts in the queue and returns the raw
+  # model answer; the admin validates it and writes the report. It has no ports and sees no registry files, no signing
+  # key, and only registry.config.json (not the rest of ./config, which holds TLS keys and password hashes).
+  # Each review uses a fresh temporary directory that is deleted afterwards; the container itself is long-running.
+  # Compose cannot restrict which hosts it may call (it needs api.anthropic.com); do that with your network policy.
+  reviewer:
+    build:
+      context: .
+      dockerfile: deploy/reviewer/Dockerfile
+    user: "${OM_UID:-10001}:${OM_GID:-10001}"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    volumes:
+      - queue:/queue
+      - ./config/registry.config.json:/config/registry.config.json:ro
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+    restart: unless-stopped
+
+  # Rotates the access log and the admin audit log. Retention is set from the environment (or a .env file):
+  # OM_ACCESS_LOG_DAYS, OM_AUDIT_LOG_DAYS (default 14 each), OM_LOG_MAX_SIZE (default 50M). See docs/admin.md.
+  logrotate:
+    build: ./deploy/logrotate
+    network_mode: none
+    volumes:
+      - audit:/audit
+      - logs:/var/log/om
+    environment:
+      OM_ACCESS_LOG_DAYS: ${OM_ACCESS_LOG_DAYS:-14}
+      OM_AUDIT_LOG_DAYS: ${OM_AUDIT_LOG_DAYS:-14}
+      OM_LOG_MAX_SIZE: ${OM_LOG_MAX_SIZE:-50M}
+    read_only: true
+    tmpfs: ["/tmp"]
+    # root, but only the capabilities needed to rewrite files owned by other users
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE, FOWNER, CHOWN]
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
     restart: unless-stopped
 
 volumes:
   audit:
   logs:
+  queue:

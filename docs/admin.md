@@ -58,7 +58,7 @@ TLS is mandatory; the service refuses to start without it unless `allowInsecureH
    The registry is served straight from that folder, so the approval is visible to clients immediately and the dashboard
    shows it as approved. `--override` is needed unless a passing review exists.
 
-`GITHUB_TOKEN` and `ANTHROPIC_API_KEY` reach the service as environment variables (use your orchestrator's secret store).
+`GITHUB_TOKEN` reaches the admin as an environment variable (use your orchestrator's secret store). `ANTHROPIC_API_KEY` goes to the separate **reviewer** container only; see [Reviews](#reviews-in-a-separate-container). Compose reads both from a `.env` file (copy `.env.example`; it is gitignored).
 
 ## What it can do
 
@@ -69,6 +69,46 @@ For anything unapproved the page shows the CLI command to run on the admin host.
 
 Every login, denial, sync and review is appended to the audit log (`auditLog`, JSON lines, who/what/when/address; never
 passwords or request bodies). Keep it on a volume that the registry web server cannot serve.
+
+## Reviews in a separate container
+
+Reviews send third-party plugin code to a model, so the process that does that does not share a container with the admin
+login, the registry write access or the GitHub and Splunk tokens. Compose runs a second service, `reviewer`, and the two
+talk through a folder (the `queue` volume):
+
+| Step | Who | What |
+| --- | --- | --- |
+| 1 | admin | Verifies the files against `versions.json`, runs the static checks, builds the prompt, writes it to `queue/requests/<uuid>.json`. |
+| 2 | reviewer | Takes the request (deleting it claims it), calls the model, writes only the raw answer to `queue/results/<uuid>.json`. |
+| 3 | admin | Reads and deletes the answer, validates it against the schema, applies the secret filter, decides the verdict, and writes `review.html` and `review.json` itself. |
+
+The reviewer has no ports, no registry files, no signing key and only `registry.config.json` (not the rest of `config/`,
+which holds TLS keys and password hashes). The admin container has no Anthropic key at all. Whatever comes back is untrusted:
+a missing, oversized (over 256 KB), malformed or secret-containing answer becomes an `error` verdict, never a pass, and nothing
+the reviewer writes ever lands in the served registry.
+
+To turn it on, set `"reviewQueue": "/queue"` in `config/admin.config.json` and give `config/registry.config.json` a review section:
+```json
+"review": { "enabled": false, "provider": "claude-code", "model": "claude-sonnet-5-5", "maxBudgetUsd": 0.5, "maxReviewsPerRun": 5 }
+```
+`enabled` only controls automatic reviews after a sync; the **Review all** button works either way. Put `ANTHROPIC_API_KEY` in
+`.env`. The reviewer needs to reach `api.anthropic.com`; Compose cannot allow-list outbound hosts, so restrict that with your
+network policy.
+
+- **Reviewer down:** the reviewer touches a heartbeat file every 5 seconds. If it is older than 30 seconds, **Review all** is refused
+  at once (503, "the reviewer container is not running") and a sync skips its reviews, rather than each version waiting out a timeout
+  and recording an error.
+- **Signed reviews:** if you set `review.signingKeyPath`, the admin (not the reviewer) signs the record, so that key would sit in the
+  admin container. The reviewer never needs it.
+- **"Ephemeral":** each review runs in a fresh temporary directory that is deleted afterwards, but the reviewer container itself is long
+  running. A container per review is possible under an orchestrator that can start Jobs (for example Kubernetes), without giving the admin
+  access to a container runtime; the queue protocol would stay the same.
+- **Limits:** one review at a time. A reviewer crash mid-review loses that request; the admin times out after 6 minutes and records an
+  error verdict, and the next run reviews it again. `wrapper` harnesses that read plugin files from disk (`stageFiles`) are refused with a
+  queue, because only the prompt crosses it. Stale files in the queue are swept after an hour.
+- **Image:** `deploy/reviewer/Dockerfile` installs Claude Code from npm (about 850 MB). Pin it with
+  `--build-arg CLAUDE_CODE_VERSION=<version>`; the default is `latest`. Without `reviewQueue`, reviews run inside the admin process
+  using the configured provider, which then needs its credentials in the admin container.
 
 ## Client activity (server-side only)
 
@@ -97,11 +137,15 @@ Aggregates and the read position are saved in **one atomic file** under `stateDi
 so a restart neither resets counts nor counts lines twice; client keys in the counts are salted hashes. Raw addresses
 exist only in the admin-only client table, never in anything the registry web server can serve.
 
-**Log rotation.** nginx does not rotate by itself. Use `logrotate` with `copytruncate` (or rotate and signal nginx), and
-rotate daily or at a modest size. The reader detects a changed inode, a smaller file, or changed leading bytes and
-restarts at the new content; lines written to a rotated-away file after the reader's last pass are lost, so keep the
-polling gap (10 s) small relative to your rotation. Behind Docker Desktop, `$remote_addr` is often the bridge gateway
-for every client; check what you see from another machine before relying on zones or distinct counts.
+**Log rotation and retention.** `docker-compose.yml` includes a `logrotate` container (no network, only the two log volumes) that checks hourly and rotates the nginx access log and the admin audit log with `copytruncate`, compressing old files. Set these in the environment or a `.env` file next to `docker-compose.yml`, then run `docker compose up -d`:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `OM_ACCESS_LOG_DAYS` | 14 | Daily access log files kept. |
+| `OM_AUDIT_LOG_DAYS` | 14 | Daily audit log files kept. Raise it if you must answer who did what further back. |
+| `OM_LOG_MAX_SIZE` | 50M | Rotate early once a log passes this size (`100k`, `50M`, `1G`). |
+
+Invalid values (0, text) fall back to the default with a warning in `docker compose logs logrotate`, so a typo cannot delete your logs. Total disk use is roughly retention days times daily volume. Docker's own container output is capped at 3 x 10 MB per service. Dashboard counts and last-seen times live in `<stateDir>/activity.json` and are not affected by rotation. Without Splunk, the retention above is all the raw request history you have. The reader detects a changed inode, a smaller file or changed leading bytes and restarts at the new content; lines written between its last pass (10 s) and a rotation are lost, so the access log is not a guaranteed record. Behind Docker Desktop, `$remote_addr` is often the bridge gateway for every client; check what you see from another machine before relying on zones or distinct counts.
 
 ### Published popularity stats
 

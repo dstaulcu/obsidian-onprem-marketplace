@@ -18,3 +18,9 @@ demo/tamper-backup/
 # local container test config (certs, keys, password hashes)
 config/
 registry-data/
+
+# compose variable file and secret files: never commit
+.env
+.env.*
+secrets/
+!.env.example

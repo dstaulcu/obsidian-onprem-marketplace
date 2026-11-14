@@ -111,6 +111,10 @@ Reviews are produced by Claude Code and by deterministic checks. Treat them as *
    behind mTLS and/or password login (see [Admin service](../admin.md)). A compromised admin login cannot sign an
    approval, but note that mounting `review.signingKeyPath` into it lets it sign review records, which clients using
    `requireReviewPass` trust. Sessions are in memory, and every allowed admin has the same rights.
+   In the container deployment the model call runs in a separate reviewer container that holds the Anthropic key and sees
+   no registry files; the admin validates what it returns exactly like any model output, so a compromised or confused
+   reviewer can cause an `error` verdict (or wasted spend) but cannot produce a pass, write into the registry, or reach the
+   admin's secrets.
 9. **Client activity is inferred, not attested.** The admin service derives it from the web server access log (no
    client reports anything), so it can be skewed by shared addresses, failed downloads and deliberate requests. It
    must not feed a trust decision. The published `stats.json` is counts-only, unsigned and display-only. A Splunk HEC
