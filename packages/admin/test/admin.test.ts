@@ -383,6 +383,19 @@ describe("rubric changes and stale reviews", () => {
     expect((await s.call("/api/plugins", { cookie })).data.rubricVersion).toBe(r.data.current.version);
   });
 
+  it("links the rubric to its repository only from the admin config, and rejects odd addresses", async () => {
+    const s = await start();
+    const cookie = await s.login();
+    expect((await s.call("/api/rubric", { cookie })).data.links).toEqual({ source: null, propose: null });
+    s.deps.cfg.rubricSourceUrl = "https://git.example.internal/o/r/tree/main/rubric";
+    s.deps.cfg.rubricProposeUrl = "https://git.example.internal/o/r/issues/new";
+    expect((await s.call("/api/rubric", { cookie })).data.links).toEqual({ source: "https://git.example.internal/o/r/tree/main/rubric", propose: "https://git.example.internal/o/r/issues/new" });
+    const base = { registryConfig: "x", auditLog: "y", password: { usersFile: "z" }, allowInsecureHttp: true };
+    expect(validateConfig({ ...base, rubricSourceUrl: "javascript:alert(1)" })[0]).toContain("rubricSourceUrl must be an http(s) address");
+    expect(validateConfig({ ...base, rubricProposeUrl: "https://x.example/issues/new?title=a" })).toHaveLength(1);
+    expect(validateConfig({ ...base, rubricSourceUrl: "https://x.example/o/r/tree/main/rubric" })).toEqual([]);
+  });
+
   it("flags a review made under another rubric version as stale, compares the versions and reports static impact", async () => {
     const s = await start();
     const cookie = await s.login();

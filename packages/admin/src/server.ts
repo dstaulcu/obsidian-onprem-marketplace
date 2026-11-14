@@ -210,6 +210,7 @@ export function createHandler(d: Deps): RequestListener {
         json(res, 200, {
           current: { name: current.name, version: current.version, promptLines: current.prompt.split("\n").filter((l) => l.trim()).length, checks: current.rules.map((r) => ({ id: r.id, title: r.title, severity: r.severity, why: r.why })) },
           history: await listSnapshots(snapDir),
+          links: { source: d.cfg.rubricSourceUrl ?? null, propose: d.cfg.rubricProposeUrl ?? null },
           note: "The rubric ships inside the admin image; to change it, change the repository's rubric folder and rebuild. A new version makes earlier reviews stale.",
         });
         return;

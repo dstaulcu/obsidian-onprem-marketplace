@@ -13,6 +13,10 @@ export interface AdminConfig {
   publicKeyFile?: string;
   /** Web address of the GitHub server, used to build "report an issue" links. Default: derived from the sync config's githubApiBase. */
   githubWebBase?: string;
+  /** Where the rubric lives in the source repository (its rubric/ folder), shown on the Rubric tab so admins can review it and its history. */
+  rubricSourceUrl?: string;
+  /** The repository's new-issue page (https://host/owner/repo/issues/new), used for "propose a change" links. */
+  rubricProposeUrl?: string;
   /** Public URL of the static registry, used for report links in the UI. */
   registryUrl?: string;
   mtls?: { allow: string[] };
@@ -59,6 +63,8 @@ export function validateConfig(c: AdminConfig): string[] {
   if (c.password && !c.password.usersFile) e.push("password.usersFile is required");
   for (const n of c.networks ?? []) if (!validNetwork(n)) e.push(`networks: bad entry ${JSON.stringify(n)} (need an IPv4 "a.b.c.d/len" and a name)`);
   if (c.githubWebBase !== undefined && !/^https?:[/][/][^/ ]+$/.test(c.githubWebBase)) e.push("githubWebBase must look like https://github.example.internal (no path)");
+  for (const [k, v] of [["rubricSourceUrl", c.rubricSourceUrl], ["rubricProposeUrl", c.rubricProposeUrl]] as const)
+    if (v !== undefined && !/^https?:[/][/][^\s?#]+$/.test(v)) e.push(`${k} must be an http(s) address without a query or fragment`);
   if (c.signerQueue !== undefined && (typeof c.signerQueue !== "string" || !c.signerQueue)) e.push("signerQueue must be a directory path");
   if (c.signerQueue && !c.publicKeyFile) e.push("signerQueue needs publicKeyFile: approvals returned by the signer are verified with it before they are used");
   if (c.reviewQueue !== undefined && (typeof c.reviewQueue !== "string" || !c.reviewQueue)) e.push("reviewQueue must be a directory path");

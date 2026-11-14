@@ -396,6 +396,11 @@ async function showActivity() {
     badge(String(e.status), e.status >= 400 ? "bad" : "muted"), clientName(e.client), e.zone || ""]))));
 }
 
+// Links to the source repository come from the admin config, never from registry data. Only http(s) addresses are used.
+const safeUrl = (u) => (typeof u === "string" && (u.startsWith("https://") || u.startsWith("http://")) ? u : "");
+function extLink(text, href, title) { const a = h("a", "issuelink", text); a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer"; if (title) a.title = title; return a; }
+const proposeUrl = (base, title, body) => base + "?title=" + encodeURIComponent(title) + "&body=" + encodeURIComponent(body);
+
 // ---- rubric: what reviews are checked against, what changed, and whether a change matters
 const sevKind = (x) => (x === "high" ? "bad" : "warn");
 async function showRubric() {
@@ -407,6 +412,12 @@ async function showRubric() {
   box.append(h("p", null, h("strong", null, cur.version), " - " + cur.checks.length + " checks and " + cur.promptLines + " lines of model instructions. ",
     stale ? badge(stale + " of " + reviewed.length + " reviews are stale", "warn") : badge("all " + reviewed.length + " reviews are current", "ok")));
   box.append(h("p", "muted small", data.note));
+  const linkBar = h("div", "rubricbar");
+  const src = safeUrl(data.links && data.links.source), prop = safeUrl(data.links && data.links.propose);
+  if (src) linkBar.append(extLink("View the rubric source and its history", src, "Opens the rubric folder in the repository"));
+  if (prop) linkBar.append(extLink("Propose a change", proposeUrl(prop, "Rubric change proposal", "I would like to propose a change to the review rubric (currently " + cur.version + ")."), "Opens a prefilled issue; you review and post it yourself"));
+  if (!src && !prop) linkBar.append(h("span", "muted small", "Set rubricSourceUrl and rubricProposeUrl in the admin config to link this page to the repository."));
+  box.append(linkBar);
 
   // what changed
   box.append(h("h2", "section", "What changed"));
@@ -429,7 +440,7 @@ async function showRubric() {
 
   // the checks themselves
   box.append(h("h2", "section", "Current checks"));
-  box.append(h("div", "standalone", tbl(["Check", "Severity", "What it looks for and why"], cur.checks.map((c) => [h("span", null, c.title, h("br"), h("code", null, c.id)), badge(c.severity, sevKind(c.severity)), c.why]))));
+  box.append(h("div", "standalone", tbl(["Check", "Severity", "What it looks for and why"], cur.checks.map((c) => [h("span", null, c.title, h("br"), h("code", null, c.id)), badge(c.severity, sevKind(c.severity)), h("span", null, c.why, prop ? h("br") : null, prop ? extLink("Suggest a change to this check", proposeUrl(prop, "Rubric change: " + c.id, "About the check '" + c.id + "' (" + c.title + ") in rubric " + cur.version + ":"), "Opens a prefilled issue") : null)]))));
   if (data.history.length) {
     box.append(h("h2", "section", "Versions seen"));
     box.append(h("div", "standalone", tbl(["Version", "First seen", ""], data.history.slice().reverse().map((x) => [h("span", "mono", x.version), when(x.seenAt), x.version === cur.version ? badge("current", "ok") : ""]))));

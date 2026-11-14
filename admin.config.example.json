@@ -10,6 +10,8 @@
   },
   "registryConfig": "/config/registry.config.json",
   "publicKeyFile": "/config/public-key.txt",
+  "rubricSourceUrl": "https://github.example.internal/your-org/obsidian-onprem-marketplace/tree/main/rubric",
+  "rubricProposeUrl": "https://github.example.internal/your-org/obsidian-onprem-marketplace/issues/new",
   "registryUrl": "https://registry.example.internal",
   "mtls": {
     "allow": [

@@ -185,7 +185,10 @@ Reviews are made against a **rubric**: the built-in checks plus the instructions
 - The same applies when you change `review.model`: reviews by another model count as out of date.
 
 The rubric ships inside the admin image (`rubric/`), so changing it means editing the repository and rebuilding. Changes go through a pull
-request, and its description is the record of why.
+request, and its description is the record of why. Set `rubricSourceUrl` (the repository's `rubric/` folder) and `rubricProposeUrl` (its
+new-issue page, `https://host/owner/repo/issues/new`) in the admin config and the Rubric tab links to both: a view of the source and its
+history, a prefilled **Propose a change** issue, and a **Suggest a change to this check** link on each check. Like Report issue, the issue
+is posted by you under your own login; the addresses come only from the config.
 
 What the dashboard shows:
 
