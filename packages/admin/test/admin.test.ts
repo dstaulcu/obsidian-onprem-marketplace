@@ -15,6 +15,7 @@ import { mtlsAuthenticator } from "../src/auth/mtls";
 import { validateConfig } from "../src/config";
 import { APP_JS } from "../src/ui";
 import { NoteStore } from "../src/notes";
+import { RepoStore } from "../src/repos";
 import { queueSigner } from "../../sync/src/signer";
 import { processQueue, touchHeartbeat } from "../../sync/src/workqueue";
 import { buildApproval } from "../../sync/src/signing";
@@ -438,6 +439,100 @@ describe("rubric changes and stale reviews", () => {
     expect(await readFile(s.audit, "utf8")).toMatch(/"targets":"stale:all \(1\)"/);
     const changed = await s.call("/api/review", { cookie, body: { stale: "changed" } }); // the static result did not move, so no free-text reason to re-review
     expect(changed.status).toBe(400);
+  });
+});
+
+describe("adding repositories from the dashboard", () => {
+  const withRepos = async (over: Parameters<typeof start>[0] = {}) => {
+    const dir = await mkdtemp(join(tmpdir(), "om-repos-"));
+    return start({ repos: new RepoStore(join(dir, "repos.json")), ...over });
+  };
+
+  it("is off without a store, and needs a login", async () => {
+    const s = await start();
+    const cookie = await s.login();
+    expect((await s.call("/api/repos", { cookie })).status).toBe(404);
+    const t = await withRepos();
+    expect((await t.call("/api/repos")).status).toBe(401);
+    expect((await t.call("/api/repos/check", { body: { repo: "o/x" } })).status).toBe(401);
+  });
+
+  it("checks without adding, then adds, audits, and syncs the new repository", async () => {
+    // "o/r" is configured; the mock serves one plugin ("demo") for any repository.
+    const s = await withRepos({ tags: ["1.0.0"] });
+    const cookie = await s.login();
+    const chk = await s.call("/api/repos/check", { cookie, body: { repo: "acme/new-plugin" } });
+    expect(chk.status).toBe(200);
+    expect(chk.data.ok).toBe(true);
+    expect((await s.call("/api/repos", { cookie })).data.nominated).toEqual([]); // checking adds nothing
+
+    const add = await s.call("/api/repos", { cookie, body: { repo: "acme/new-plugin", note: "asked for by the docs team" } });
+    expect(add.status).toBe(201);
+    const list = (await s.call("/api/repos", { cookie })).data;
+    expect(list.configured).toEqual(["o/r"]);
+    expect(list.nominated).toMatchObject([{ repo: "acme/new-plugin", addedBy: "alice", note: "asked for by the docs team" }]);
+
+    const seen: string[] = [];
+    s.deps.fetcher = async (url, accept) => { if (url.includes("/releases")) seen.push(url); return mockFetcher(["1.0.0"])(url, accept); };
+    await s.waitJob((await s.call("/api/sync", { cookie, method: "POST" })).data.job.id, cookie);
+    expect(seen.some((u) => u.includes("/repos/acme/new-plugin/releases"))).toBe(true);
+    expect(seen.some((u) => u.includes("/repos/o/r/releases"))).toBe(true);
+
+    const audit = await readFile(s.audit, "utf8");
+    expect(audit).toMatch(/"action":"repo.check"/);
+    expect(audit).toMatch(/"action":"repo.add".*acme\/new-plugin/);
+  });
+
+  it("refuses bad names, duplicates, repositories sync would reject, and a plugin id that belongs to another repository", async () => {
+    const s = await withRepos();
+    const cookie = await s.login();
+    for (const repo of ["", "nope", "a/b/c", "../x/y", "https://github.com/a/b", 5])
+      expect((await s.call("/api/repos", { cookie, body: { repo } })).status).toBe(400);
+    expect((await s.call("/api/repos", { cookie, body: { repo: "o/r" } })).status).toBe(409); // already in registry.config.json
+
+    s.deps.fetcher = async () => new Response("{}", { status: 404 });
+    const missing = await s.call("/api/repos", { cookie, body: { repo: "acme/missing" } });
+    expect(missing.status).toBe(422);
+    expect(missing.data.error).toMatch(/does not know this repository/);
+    // "demo" is mirrored from o/r; another repository may not take over that id, neither when nominated nor when sync runs.
+    s.deps.fetcher = mockFetcher(["1.0.0"]);
+    await s.waitJob((await s.call("/api/sync", { cookie, method: "POST" })).data.job.id, cookie);
+    const idx = JSON.parse(await readFile(join(s.outDir, "index.json"), "utf8"));
+    expect(idx[0].repo).toBe("o/r");
+    const clash = await s.call("/api/repos", { cookie, body: { repo: "evil/demo-fork" } });
+    expect(clash.status).toBe(422);
+    expect(clash.data.error).toMatch(/demo is already provided by o\/r/);
+
+    // A repository with a different plugin is fine, and cannot be added twice (case-insensitively).
+    s.deps.fetcher = async (url, accept) => (url.endsWith("manifest.json") ? new Response(manifest("1.0.0").replace('"demo"', '"other"')) : mockFetcher(["1.0.0"])(url, accept));
+    expect((await s.call("/api/repos", { cookie, body: { repo: "acme/a" } })).status).toBe(201);
+    expect((await s.call("/api/repos", { cookie, body: { repo: "ACME/A" } })).status).toBe(409);
+    expect((await s.call("/api/repos", { cookie })).data.nominated.map((n: any) => n.repo)).toEqual(["acme/a"]);
+
+    // And sync itself refuses to mix versions in under another repository's plugin id.
+    s.deps.fetcher = mockFetcher(["1.0.0", "1.1.0"]);
+    const j = await s.waitJob((await s.call("/api/sync", { cookie, method: "POST" })).data.job.id, cookie);
+    expect(j.status).toBe("failed");
+    expect((j.output as string[]).join("\n")).toMatch(/plugin id "demo" is already provided by o\/r/);
+  });
+
+  it("removes only repositories added from the dashboard, and audits it", async () => {
+    const s = await withRepos();
+    const cookie = await s.login();
+    await s.call("/api/repos", { cookie, body: { repo: "acme/a" } });
+    expect((await s.call("/api/repos/remove", { cookie, body: { repo: "o/r" } })).status).toBe(404); // from the config file
+    expect((await s.call("/api/repos/remove", { cookie, body: { repo: "acme/a" } })).status).toBe(200);
+    expect((await s.call("/api/repos", { cookie })).data.nominated).toEqual([]);
+    expect(await readFile(s.audit, "utf8")).toMatch(/"action":"repo.remove"/);
+    expect((await s.call("/api/repos/remove", { cookie, body: { repo: "acme/a" } })).status).toBe(404);
+  });
+
+  it("throttles checks", async () => {
+    const s = await withRepos();
+    const cookie = await s.login();
+    let last = 0;
+    for (let i = 0; i < 22; i++) last = (await s.call("/api/repos/check", { cookie, body: { repo: "acme/a" } })).status;
+    expect(last).toBe(429);
   });
 });
 

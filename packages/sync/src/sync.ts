@@ -73,6 +73,10 @@ export async function syncRegistry(cfg: Config, f: Fetcher, log: (line: string) 
   const pluginsDir = join(cfg.outDir, "plugins");
   await mkdir(pluginsDir, { recursive: true });
   const repoOfPlugin: Record<string, string> = {};
+  // A plugin id belongs to the repository that first provided it. Another repository declaring the same id is refused, so it cannot
+  // add its own versions under that plugin's name.
+  let owners: Record<string, string> = {};
+  try { owners = Object.fromEntries((JSON.parse(await readFile(join(cfg.outDir, "index.json"), "utf8")) as IndexEntry[]).filter((e) => e.repo).map((e) => [e.id, e.repo])); } catch { /* no index yet */ }
 
   for (const rc of cfg.repos) {
     try {
@@ -97,6 +101,8 @@ export async function syncRegistry(cfg: Config, f: Fetcher, log: (line: string) 
           const errs = validateManifest(manifest);
           if (errs.length) throw new Error(errs.join(", "));
           if (manifest.version !== tagVer) throw new Error(`tag ${rel.tag_name} != manifest version ${manifest.version}`);
+          const owner = repoOfPlugin[manifest.id] ?? owners[manifest.id];
+          if (owner && owner.toLowerCase() !== rc.repo.toLowerCase()) throw new Error(`plugin id "${manifest.id}" is already provided by ${owner}; not mixing in versions from ${rc.repo}`);
           repoOfPlugin[manifest.id] = rc.repo;
           const vdir = join(pluginsDir, manifest.id, manifest.version);
           if (await exists(join(vdir, "manifest.json"))) { res.skipped.push(label); log(`  = ${manifest.id}@${manifest.version}: already mirrored`); continue; }

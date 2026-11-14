@@ -58,6 +58,7 @@ services:
     volumes:
       - ./registry-data:/usr/share/nginx/html:ro
       - ./deploy/nginx-om.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/landing:/usr/share/nginx/landing:ro
       - logs:/var/log/om
     read_only: true
     tmpfs: ["/var/cache/nginx", "/var/run", "/tmp"]

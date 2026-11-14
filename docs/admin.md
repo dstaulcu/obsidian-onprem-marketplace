@@ -88,6 +88,30 @@ They run as audited jobs (`manage.<action>`), so they cannot interleave with a s
 clients stay installed**: clients cannot be told to uninstall, and there is no signed revocation list yet (see
 [Security](concepts/security.md)). The files stay in the registry, so a withdrawn version can be released again.
 
+## Nominating and adding plugin repositories
+
+**For people who want a plugin.** The registry's landing page (`http://<registry>/`) has a **Nominate a plugin** link. It opens a prefilled
+GitHub issue form (`.github/ISSUE_TEMPLATE/nominate-plugin.yml`) in the repository named in `deploy/landing/landing.json` (`nominateUrl`, an
+https address; point it at your own tracker). The nominator needs no registry account. Nothing about a nomination is automatic: an admin
+decides.
+
+**For admins: the Repositories tab.** Enter `owner/name` and press **Check** to see, without changing anything, whether sync would accept the
+repository: it exists (and the registry's token can see it), it has a published release (drafts and pre-releases are ignored), the release
+carries `main.js` and `manifest.json`, the manifest is valid, and the tag equals the manifest version. The three newest releases are tried
+and each problem is listed. **Add and sync** repeats the check on the server (the page's earlier answer is never trusted), adds the
+repository and runs a sync.
+
+- Added repositories are kept in `<stateDir>/repos.json` and merged with the `repos` list when a sync runs. The admin never edits
+  `registry.config.json`. The tab shows where each entry came from; only dashboard entries have a **Remove** button (config-file entries are
+  removed by editing the file). Removing stops future syncing; versions already mirrored stay until you withdraw them.
+- Adding a repository only lets sync **mirror** its releases. Nothing is installable until a version is reviewed and approved, exactly as
+  before.
+- **A plugin id belongs to the repository that first provided it.** The check refuses a repository that declares an id another repository
+  already provides, and sync itself refuses to mix in versions under that id from a different repository (it reports an error and skips them).
+  Without this, a second repository could add its own versions under another plugin's name.
+- Every check, add and remove is audited (`repo.check`, `repo.add`, `repo.remove`), checks are limited to 20 a minute, and a note you type is
+  stored as plain text.
+
 ## Reporting findings to the plugin's repository
 
 A reviewed version with verdict `findings` or `fail` gets a **Report issue** link. It opens the plugin repository's new-issue page with a

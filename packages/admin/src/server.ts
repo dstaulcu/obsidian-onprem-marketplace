@@ -13,6 +13,9 @@ import { dirname, join } from "node:path";
 import { loadRubric, type Rubric } from "@om/sync/src/rubric";
 import { diffSnapshots, listSnapshots, loadSnapshot, saveSnapshot, staleTargets, staticImpact, toSnapshot } from "@om/sync/src/rubricdiff";
 import { NoteError, type NoteStore } from "./notes";
+import { RepoError, withNominated, type RepoStore } from "./repos";
+import { checkRepo, isValidRepo, mirroredRepos } from "@om/sync/src/nominate";
+import { makeFetcher } from "@om/sync/src/sync";
 import type { Audit } from "./audit";
 import type { AdminConfig } from "./config";
 import { Busy, JobRunner } from "./jobs";
@@ -28,6 +31,8 @@ import { APP_CSS, APP_JS, INDEX_HTML } from "./ui";
 export interface Deps {
   cfg: AdminConfig;
   loadRegistryConfig(): Promise<Config>;
+  /** Repositories added from the dashboard (merged into the sync list). Unset: the repository API answers 404. */
+  repos?: RepoStore;
   /** Where reviews run (the queue to the reviewer container). Unset: in-process. */
   reviewOpts?: ReviewOpts;
   /** Shared triage notes. Unset: the notes API answers 404. */
@@ -63,6 +68,8 @@ function githubWebBase(configured: string | undefined, apiBase: string): string 
   if (configured) return configured;
   try { const u = new URL(apiBase); return u.hostname === "api.github.com" ? "https://github.com" : u.origin; } catch { return ""; }
 }
+/** The registry config (read fresh each time) plus the repositories added from the dashboard. */
+const loadRc = async (d: Deps): Promise<Config> => withNominated(await d.loadRegistryConfig(), d.repos);
 class HttpError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -81,6 +88,7 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 }
 
 export function createHandler(d: Deps): RequestListener {
+  let repoChecks: number[] = [];
   const identify = (req: IncomingMessage): Identity | null => {
     for (const a of d.authenticators) { const id = a.authenticate(req); if (id) return id; }
     return d.password?.sessions.get(cookieValue(req.headers.cookie, COOKIE)) ?? null;
@@ -153,7 +161,7 @@ export function createHandler(d: Deps): RequestListener {
         return;
       }
       if (method === "GET" && path === "/api/plugins") {
-        const rc = await d.loadRegistryConfig();
+        const rc = await loadRc(d);
         json(res, 200, { registryUrl: d.cfg.registryUrl ?? null, githubWebBase: githubWebBase(d.cfg.githubWebBase, rc.githubApiBase), publishPolicy: rc.publishPolicy ?? "all", notes: !!d.notes, canApprove: !!d.signer, rubricVersion: (await rubricCtx(d, rc).catch(() => null))?.current.version ?? null, plugins: await registryState(rc.outDir, d.publicKey) });
         return;
       }
@@ -169,7 +177,7 @@ export function createHandler(d: Deps): RequestListener {
       }
 
       if (method === "POST" && path === "/api/sync") {
-        const rc = await d.loadRegistryConfig();
+        const rc = await loadRc(d);
         const job = d.jobs.start("sync", who.name, async (log) => {
           const r = await runSync(rc, log, d.env, d.fetcher, d.reviewOpts);
           if (r.errors.length) throw new Error(`${r.errors.length} error(s) during sync`);
@@ -180,7 +188,7 @@ export function createHandler(d: Deps): RequestListener {
       }
       if (method === "POST" && path === "/api/review") {
         const body = await readJson(req);
-        const rc = await d.loadRegistryConfig();
+        const rc = await loadRc(d);
         if (!rc.review) throw new HttpError(400, "no \"review\" section in the registry config");
         let targets: { id: string; version: string }[];
         if (body.all === true) targets = await allVersions(rc.outDir);
@@ -205,7 +213,7 @@ export function createHandler(d: Deps): RequestListener {
       }
       if (method === "GET" && path === "/api/rubric") {
         // The rubric the admin reviews with: what it checks now, and the earlier versions it has seen (for comparing).
-        const rc = await d.loadRegistryConfig();
+        const rc = await loadRc(d);
         const { current, snapDir } = await rubricCtx(d, rc).catch((e: Error) => { throw new HttpError(503, "cannot load the rubric: " + e.message); });
         json(res, 200, {
           current: { name: current.name, version: current.version, promptLines: current.prompt.split("\n").filter((l) => l.trim()).length, checks: current.rules.map((r) => ({ id: r.id, title: r.title, severity: r.severity, why: r.why })) },
@@ -216,7 +224,7 @@ export function createHandler(d: Deps): RequestListener {
         return;
       }
       if (method === "GET" && path === "/api/rubric/diff") {
-        const rc = await d.loadRegistryConfig();
+        const rc = await loadRc(d);
         const { current, snapDir } = await rubricCtx(d, rc).catch((e: Error) => { throw new HttpError(503, "cannot load the rubric: " + e.message); });
         const from = new URL(req.url ?? "/", "http://x").searchParams.get("from") ?? "";
         const old = await loadSnapshot(snapDir, from);
@@ -226,7 +234,7 @@ export function createHandler(d: Deps): RequestListener {
       }
       if (method === "GET" && path === "/api/rubric/impact") {
         // Free: re-runs only the deterministic checks over every mirrored version. No model is called.
-        const rc = await d.loadRegistryConfig();
+        const rc = await loadRc(d);
         const { current, snapDir } = await rubricCtx(d, rc).catch((e: Error) => { throw new HttpError(503, "cannot load the rubric: " + e.message); });
         const rows = await staticImpact(rc.outDir, current, snapDir);
         const count = (s: string) => rows.filter((r) => r.status === s).length;
@@ -243,7 +251,7 @@ export function createHandler(d: Deps): RequestListener {
         if (!d.publicKey) throw new HttpError(503, "no public key is configured to verify the signer's answer");
         const why = await d.signer.ready();
         if (why) throw new HttpError(503, why);
-        const rc = await d.loadRegistryConfig();
+        const rc = await loadRc(d);
         const { id, version } = body as { id: string; version: string };
         const override = typeof body.override === "string" && body.override.trim() ? body.override.trim() : undefined;
         const signer = d.signer;
@@ -276,7 +284,7 @@ export function createHandler(d: Deps): RequestListener {
       if (method === "POST" && path === "/api/manage") {
         // Withdraw / hold back / release / revoke approval. Runs as a job so it cannot interleave with a sync or review.
         const body = await readJson(req);
-        const rc = await d.loadRegistryConfig();
+        const rc = await loadRc(d);
         if (typeof body.id !== "string" || typeof body.version !== "string" || !isValidPluginId(body.id) || !isSafeVersion(body.version)) throw new HttpError(400, "send {action, id, version}");
         if (!MANAGE_ACTIONS.includes(body.action as ManageAction)) throw new HttpError(400, "action must be one of " + MANAGE_ACTIONS.join(", "));
         const { id, version } = body as { id: string; version: string };
@@ -299,9 +307,48 @@ export function createHandler(d: Deps): RequestListener {
           return;
         }
       }
+      if (path === "/api/repos" || path === "/api/repos/check" || path === "/api/repos/remove") {
+        if (!d.repos) throw new HttpError(404, "adding repositories from the dashboard is not enabled");
+        const base = await d.loadRegistryConfig();
+        if (method === "GET" && path === "/api/repos") {
+          json(res, 200, { configured: base.repos.map((r) => r.repo), nominated: await d.repos.list(), note: "Adding a repository only lets sync mirror its releases. Nothing is installable until a version is reviewed and approved." });
+          return;
+        }
+        if (method !== "POST") throw new HttpError(405, "use POST");
+        const body = await readJson(req);
+        if (!isValidRepo(body.repo)) throw new HttpError(400, "use the form owner/name, for example acme/my-plugin");
+        const repo = body.repo;
+        if (path === "/api/repos/remove") {
+          const ok = await d.repos.remove(repo);
+          if (!ok) throw new HttpError(404, "that repository was not added from the dashboard (repositories in registry.config.json are removed by editing it)");
+          await d.audit.record(who.name, "repo.remove", { target: repo }, ip);
+          json(res, 200, { ok: true });
+          return;
+        }
+        // Checking calls GitHub, so it is throttled.
+        const now = Date.now(); repoChecks = repoChecks.filter((t) => now - t < 60_000);
+        if (repoChecks.length >= 20) throw new HttpError(429, "too many checks; wait a minute");
+        repoChecks.push(now);
+        const rc = await loadRc(d);
+        const f = d.fetcher ?? makeFetcher(rc.tokenEnv ? (d.env ?? process.env)[rc.tokenEnv] : undefined);
+        const check = await checkRepo(rc.githubApiBase, f, repo, await mirroredRepos(rc.outDir));
+        if (path === "/api/repos/check") {
+          await d.audit.record(who.name, "repo.check", { target: repo, ok: check.ok }, ip);
+          json(res, 200, check);
+          return;
+        }
+        // Adding re-runs the check here; the page's earlier answer is never trusted.
+        if (!check.ok) throw new HttpError(422, check.summary);
+        try {
+          const e = await d.repos.add(who.name, repo, base.repos.map((r) => r.repo), body.note);
+          await d.audit.record(who.name, "repo.add", { target: repo, ...(e.note ? { note: e.note } : {}) }, ip);
+          json(res, 201, { repo: e, check });
+        } catch (e) { if (e instanceof RepoError) throw new HttpError(409, e.message); throw e; }
+        return;
+      }
       if (method === "GET" && path === "/api/clients") {
         if (!d.activity) { json(res, 200, { enabled: false, clients: [], adoption: [] }); return; }
-        const rc = await d.loadRegistryConfig();
+        const rc = await loadRc(d);
         const views = clientViews(d.activity.store.clientRows(), await registryState(rc.outDir, d.publicKey));
         json(res, 200, { enabled: true, note: "Derived from registry downloads: shows the last version each client fetched, not what is installed or enabled.", error: d.activity.lastError, clients: views, adoption: adoption(views) });
         return;

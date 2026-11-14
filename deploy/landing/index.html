@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Plugin registry</title><link rel="stylesheet" href="/landing.css"></head>
+<body><main>
+<h1>Plugin registry</h1>
+<p class="muted">This is a read-only registry of approved Obsidian plugins. It is meant to be used by the <code>om</code> command and the On-Prem Marketplace plugin, not browsed by hand.</p>
+<h2>Plugins</h2>
+<ul id="list"><li class="muted">Loading...</li></ul>
+<div id="nominate" hidden><h2>Need a plugin that is not here?</h2>
+<p><a id="nominatelink" rel="noopener noreferrer" target="_blank" href="#">Nominate a plugin</a> <span class="muted">(opens a request on GitHub; an admin reviews it)</span></p></div>
+<h2>For clients</h2>
+<p>Point <code>om</code> or the plugin at this address. The registry files are:</p>
+<ul>
+<li><a href="/index.json">index.json</a>: the latest version of each plugin</li>
+<li><code>/plugins/&lt;id&gt;/versions.json</code>: every version, with hashes</li>
+</ul>
+<p class="muted small">Nothing here can change anything. Approvals are signed separately and checked by the client.</p>
+</main><script src="/landing.js"></script></body></html>

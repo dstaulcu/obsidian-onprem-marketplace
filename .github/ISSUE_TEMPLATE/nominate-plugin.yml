@@ -1,0 +1,33 @@
+name: Nominate a plugin
+description: Ask for an Obsidian plugin to be added to the internal registry
+title: "Nominate plugin: "
+labels: ["nomination"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. An admin will check the plugin's releases, run the automated review, and decide whether to approve it. Nominating does not make it installable by itself.
+  - type: input
+    id: repo
+    attributes:
+      label: Plugin repository
+      description: The GitHub repository as owner/name, for example acme/my-plugin
+      placeholder: owner/name
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What do you need it for?
+      description: What it does and who would use it.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version you tried (optional)
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else the reviewer should know (optional)
+      description: For example what network access or vault access you expect it to need.

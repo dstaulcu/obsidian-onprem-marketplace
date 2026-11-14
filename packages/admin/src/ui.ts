@@ -55,6 +55,19 @@ export const INDEX_HTML = `<!doctype html>
       <div id="clients"></div>
     </div>
     <div id="panel-activity" class="panel" role="tabpanel" hidden><div id="activity"></div></div>
+    <div id="panel-repos" class="panel" role="tabpanel" hidden>
+      <form id="repoform" class="repoform" autocomplete="off">
+        <label for="f-repo" class="muted small">Add a repository whose releases should be mirrored</label>
+        <div class="rubricbar">
+          <input id="f-repo" class="repoinput" placeholder="owner/name" maxlength="201" spellcheck="false" aria-label="Repository, as owner/name" required>
+          <input id="f-reponote" class="repoinput" placeholder="Why (optional, shown in the list)" maxlength="200" aria-label="Note about this repository">
+          <button id="repocheck" class="btn" type="button" title="Check that the repository has a release sync would accept (adds nothing)">Check</button>
+          <button id="repoadd" class="btn primary" type="submit" title="Check, add to the sync list, then run a sync">Add and sync</button>
+        </div>
+      </form>
+      <div id="repoout"></div>
+      <div id="repolist"></div>
+    </div>
     <div id="panel-rubric" class="panel" role="tabpanel" hidden><div id="rubric"></div></div>
     <div id="panel-forwarding" class="panel" role="tabpanel" hidden><div id="forwarder"></div></div>
     <div id="panel-jobs" class="panel" role="tabpanel" hidden>
@@ -103,7 +116,9 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Consolas,Menlo,monospace;font
 code{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:0 .3rem}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-.top{display:flex;align-items:center;gap:.7rem;padding:.7rem 1.25rem;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5}
+.vtable table{table-layout:fixed;min-width:760px}.vtable{overflow-x:auto}.vtable th:nth-child(1){width:11%}.vtable th:nth-child(2){width:13%}.vtable th:nth-child(3){width:22%}.vtable th:nth-child(4){width:24%}.vtable td{overflow-wrap:anywhere}
+.brand h1{color:var(--text)}.top .btn{flex:none}
+.top{display:flex;align-items:center;gap:.7rem;padding:.7rem 1.25rem;min-height:3.2rem;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5}
 .brand{display:flex;align-items:center;gap:.6rem}.brand h1{font-size:1.05rem}
 .logo{width:22px;height:22px;border-radius:6px;background:var(--accent);position:relative;display:inline-block}
 .logo::after{content:"";position:absolute;left:5px;top:5px;width:12px;height:12px;border:2px solid var(--accent-text);border-radius:3px}
@@ -181,6 +196,8 @@ textarea{font:inherit;color:var(--text);background:var(--surface);border:1px sol
 .diffbox ul{margin:.3rem 0 .6rem 1.1rem;padding:0}.diffbox li{margin:.15rem 0}
 .diffline{font:12.5px/1.5 ui-monospace,SFMono-Regular,Consolas,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 .diffline.add{color:var(--ok)}.diffline.del{color:var(--bad)}
+.repoinput{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.45rem .65rem;min-width:14rem;flex:1 1 14rem}
+.repores{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:.7rem 1rem;margin:.4rem 0 1rem}.repores ul{margin:.3rem 0 0 1.1rem;padding:0}
 .rubricbar{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin:.6rem 0}
 select{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.4rem .6rem;max-width:100%}
 @media (max-width:640px){main{padding:.75rem}.top{padding:.6rem .75rem}td,th{padding:.5rem .6rem}}`;
@@ -367,7 +384,7 @@ async function showPlugins() {
       if (S.notesOn) acts.append(noteButton(p.id, v.version));
       return [h("span", "mono", v.version), v.staged ? badge("Held back", "warn", "Not listed to clients yet") : badge("Published", "info"), h("span", "revcell", reviewBadge(v.review), v.review ? reportLink(p.id, v.version) : null), approvalBadge(v.approval), acts];
     });
-    g.append(tbl(["Version", "State", "Review", "Approval", "Actions"], rows)); box.append(g);
+    const vt = tbl(["Version", "State", "Review", "Approval", "Actions"], rows); vt.classList.add("vtable"); g.append(vt); box.append(g);
   }
   applyFilter($("q-plugins"), box, ".group");
 }
@@ -483,6 +500,46 @@ async function renderImpact(box) {
   box.append(h("p", "muted small", "Each re-review is one paid model call and replaces that version's review. Approvals are not touched, but an approval made on the strength of an older review stays valid until you withdraw it."));
 }
 
+// ---- repositories: which GitHub repositories sync mirrors. Added ones are kept by the admin; registry.config.json is never edited.
+async function showRepos() {
+  const { status, data } = await api("/api/repos"); const box = $("repolist"); box.replaceChildren();
+  $("repoform").hidden = status !== 200;
+  if (status !== 200 || !data) { box.append(empty("Adding repositories is not enabled", "Repositories are listed in registry.config.json instead.")); return; }
+  const pluginsOf = (repo) => S.plugins.filter((p) => (p.repo || "").toLowerCase() === repo.toLowerCase()).map((p) => p.id);
+  const base = safeUrl(S.githubWebBase);
+  const rows = [];
+  for (const r of data.configured) rows.push({ repo: r, src: "config", by: "", at: "", note: "" });
+  for (const n of data.nominated) rows.push({ repo: n.repo, src: "dashboard", by: n.addedBy, at: n.addedAt, note: n.note || "" });
+  const cells = rows.map((r) => {
+    const ids = pluginsOf(r.repo);
+    const name = base && REPO_OK.test(r.repo) ? extLink(r.repo, base + "/" + r.repo, "Open the repository on GitHub") : h("span", "mono", r.repo);
+    const act = r.src === "dashboard" ? confirmButton("Remove", "Stop syncing this?", async () => { const x = await api("/api/repos/remove", { repo: r.repo }); say(x.status === 200 ? "Removed " + r.repo + ". Versions already mirrored stay until you withdraw them." : ((x.data && x.data.error) || "Failed"), x.status === 200 ? "ok" : "bad"); await showRepos(); }, true, "Stop syncing this repository. Already-mirrored versions stay in the registry; withdraw them on the Plugins tab.") : h("span", "muted small", "edit registry.config.json");
+    act.classList && act.classList.remove("rowbtn"); if (act.disabled !== undefined && r.src === "dashboard") act.disabled = false;
+    return [name, ids.length ? ids.join(", ") : h("span", "muted", "nothing mirrored yet"), r.src === "config" ? badge("config file", "muted") : badge("dashboard", "ok"), r.src === "dashboard" ? h("span", null, r.by + " ", when(r.at), r.note ? h("br") : null, r.note || null) : "", act];
+  });
+  box.append(cells.length ? h("div", "standalone", tbl(["Repository", "Plugin", "Added", "By", ""], cells)) : empty("No repositories yet", "Add one above."));
+  box.append(h("p", "muted small", data.note));
+}
+function renderRepoCheck(c) {
+  const box = $("repoout"); box.replaceChildren();
+  const r = h("div", "repores", h("strong", null, c.repo + ": "), badge(c.ok ? "would be accepted" : "would not be accepted", c.ok ? "ok" : "bad"), h("p", null, c.summary));
+  const ul = h("ul"); for (const x of c.releases) ul.append(h("li", null, h("span", "mono", x.tag), " ", x.ok ? badge("ok", "ok") : badge("skipped", "warn"), x.problems.length ? " " + x.problems.join("; ") : ""));
+  if (c.releases.length) r.append(ul); box.append(r);
+}
+async function repoAction(add) {
+  const repo = $("f-repo").value.trim(); if (!repo) { $("f-repo").focus(); return; }
+  say(""); $("repocheck").disabled = $("repoadd").disabled = true;
+  try {
+    if (!add) { const x = await api("/api/repos/check", { repo }); if (x.status === 200) renderRepoCheck(x.data); else say((x.data && x.data.error) || "Failed (" + x.status + ")", "bad"); return; }
+    const x = await api("/api/repos", { repo, note: $("f-reponote").value.trim() });
+    if (x.status !== 201) { say((x.data && x.data.error) || "Failed (" + x.status + ")", "bad"); return; }
+    renderRepoCheck(x.data.check); $("f-repo").value = ""; $("f-reponote").value = ""; await showRepos();
+    say("Added " + repo + ". Running a sync to pull its releases.", "ok"); await runJob("/api/sync", {});
+  } finally { $("repocheck").disabled = $("repoadd").disabled = false; }
+}
+$("repoform").onsubmit = (e) => { e.preventDefault(); repoAction(true); };
+$("repocheck").onclick = () => repoAction(false);
+
 // ---- forwarding
 async function showForwarder() {
   const { data } = await api("/api/forwarder"); const box = $("forwarder"); box.replaceChildren();
@@ -525,7 +582,7 @@ async function start(kind, body) {
 }
 
 // ---- tabs
-const TABS = [["plugins", "Plugins"], ["clients", "Clients"], ["activity", "Activity"], ["rubric", "Rubric"], ["forwarding", "Forwarding"], ["jobs", "Jobs"]];
+const TABS = [["plugins", "Plugins"], ["clients", "Clients"], ["activity", "Activity"], ["repos", "Repositories"], ["rubric", "Rubric"], ["forwarding", "Forwarding"], ["jobs", "Jobs"]];
 function buildTabs() {
   const box = $("tabs"); box.replaceChildren();
   for (const [id, label] of TABS) { const b = h("button", "tab", label); b.type = "button"; b.setAttribute("role", "tab"); b.dataset.tab = id;
@@ -545,7 +602,7 @@ function initTheme() { let m = "auto"; try { m = localStorage.getItem("om-theme"
   $("theme").onclick = () => { const cur = document.documentElement.dataset.theme || "auto"; const next = cur === "auto" ? "light" : cur === "light" ? "dark" : "auto"; applyTheme(next); try { localStorage.setItem("om-theme", next); } catch {} }; }
 
 async function refreshAll() {
-  await Promise.all([showPlugins(), showClients(), showActivity(), showForwarder(), showJobs()]); await showRubric();
+  await Promise.all([showPlugins(), showClients(), showActivity(), showForwarder(), showJobs()]); await showRepos(); await showRubric();
   $("updated").textContent = "Updated " + new Date().toLocaleTimeString(); renderCards();
 }
 async function init() {
