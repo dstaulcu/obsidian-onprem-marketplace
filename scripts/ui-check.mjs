@@ -1,7 +1,7 @@
 // Opens the landing page and the admin dashboard in a real browser (the Edge/Chrome already installed; nothing is downloaded), clicks
-// through every tab, saves a screenshot of each and fails on any script error, console error or failed request. It does this three times:
-// light at desktop width, dark at desktop width, and light at phone width (where it also fails if the page scrolls sideways).
-//   npm run ui-check [-- --admin https://localhost:8443 --registry http://localhost:8080 --out ui-check-out --only light]
+// through every tab, saves a screenshot of each and fails on any script error, console error or failed request. It runs light and dark at
+// desktop width. Add --phone for a third run at phone width (which also fails if the page scrolls sideways); desktop is the main target.
+//   npm run ui-check [-- --admin https://localhost:8443 --registry http://localhost:8080 --out ui-check-out --only light|dark|phone --phone]
 // Needs the containers running (docker compose --profile signer up -d) and, for the admin pages, a TEST login in config/test-login.txt
 // ("user: ..." and "password: ..." lines). Only local addresses are accepted, because the admin's self-signed certificate is trusted here.
 import { chromium } from "playwright-core";
@@ -22,7 +22,7 @@ const VARIANTS = [
   { name: "light", colorScheme: "light", viewport: { width: 1400, height: 1000 } },
   { name: "dark", colorScheme: "dark", viewport: { width: 1400, height: 1000 } },
   { name: "phone", colorScheme: "light", viewport: { width: 390, height: 844 }, isMobile: true, checkOverflow: true },
-].filter((v) => !only || v.name === only);
+].filter((v) => (only ? v.name === only : v.name !== "phone" || process.argv.includes("--phone")));
 
 let creds = null;
 try {
