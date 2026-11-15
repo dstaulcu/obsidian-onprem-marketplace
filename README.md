@@ -105,8 +105,10 @@ node scripts/bootstrap-vault.mjs <vaultPath> http://127.0.0.1:8080 keys/public-k
 `om` (`npm run build:exe` produces `dist/om.exe`) is the user-side command line: `om vaults`, `om init --registry <address> --vault <name>`,
 `om marketplace`, `om list`, `om install`, `om update`. See [Overview](docs/README.md).
 
-Want to see it first? The [`demo/`](demo) folder runs the whole flow offline against a fake GitHub with a benign plugin and
-an inert, deliberately suspicious one. A recording of the client plugin lifecycle is in [`demo/README.md`](demo/README.md).
+Want to see it first? The [`demo/`](demo) folder is a playbook for an offline walkthrough with a fake GitHub, a benign plugin and an
+inert, deliberately suspicious one, and it holds a recording of the client plugin lifecycle. **It is a draft that has not yet been run end to end**
+(the command-line scripts predate the dashboard and the user page, and the container track is not built yet); the to-do list is in
+[`demo/README.md`](demo/README.md).
 
 ## Status
 
