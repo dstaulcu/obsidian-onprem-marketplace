@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { validNetwork, type Network } from "./events";
 import { validateSplunk, type SplunkConfig } from "./splunk";
 import { validateNominations, type NominationsConfig } from "./nominations";
 
@@ -32,8 +31,6 @@ export interface AdminConfig {
   basePath?: string;
   /** Where cursors and client aggregates are kept (never inside the served tree). Default: <auditLog dir>/state. */
   stateDir?: string;
-  /** Labels for client addresses, e.g. { "cidr": "10.20.0.0/16", "name": "Engineering" }. IPv4 only. */
-  networks?: Network[];
   /** Counts-only stats.json written into the registry for the marketplace listing. Needs accessLog. */
   stats?: { publish?: boolean; windowDays?: number; minCount?: number };
   /**
@@ -67,7 +64,6 @@ export function validateConfig(c: AdminConfig): string[] {
   if (c.mtls && !c.tls?.clientCa) e.push("mtls needs tls.clientCa (the CA that issues admin client certificates)");
   if (c.mtls && !c.mtls.allow?.length) e.push("mtls.allow is empty: no certificate would be authorised");
   if (c.password && !c.password.usersFile) e.push("password.usersFile is required");
-  for (const n of c.networks ?? []) if (!validNetwork(n)) e.push(`networks: bad entry ${JSON.stringify(n)} (need an IPv4 "a.b.c.d/len" and a name)`);
   if (c.githubWebBase !== undefined && !/^https?:[/][/][^/ ]+$/.test(c.githubWebBase)) e.push("githubWebBase must look like https://github.example.internal (no path)");
   for (const [k, v] of [["rubricSourceUrl", c.rubricSourceUrl], ["rubricProposeUrl", c.rubricProposeUrl]] as const)
     if (v !== undefined && !/^https?:[/][/][^\s?#]+$/.test(v)) e.push(`${k} must be an http(s) address without a query or fragment`);

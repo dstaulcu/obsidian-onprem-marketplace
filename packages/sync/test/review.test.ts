@@ -106,3 +106,30 @@ describe("reviewVersion", () => {
     await expect(reviewVersion(out, "demo", "1.0.0", reviewerOf(passModel), { rubric })).rejects.toThrow(/does not match/);
   });
 });
+
+describe("report text for issues", () => {
+  it("lists the manifest facts in the report and in the issue text, shortened and as text", async () => {
+    const { manifestFacts } = await import("../src/review");
+    const f = manifestFacts(JSON.stringify({ id: "demo", name: "Demo", version: "1.0.0", author: "A", description: "x".repeat(900), isDesktopOnly: true, evil: "ignored" }));
+    expect(f.map((x) => x[0])).toEqual(["name", "id", "version", "author", "description", "isDesktopOnly"]);
+    expect(f.find((x) => x[0] === "description")![1].length).toBe(500);
+    expect(manifestFacts("not json")).toEqual([]);
+  });
+
+  it("writes review.md next to review.html with every untrusted part inside code fences", async () => {
+    const { out, vdir } = await fixture("eval('1');\n");
+    const hostile = { verdict: "findings", summary: "see ``` @someone [click](http://evil.example) <img src=x>", findings: [{ severity: "high", title: "`bad` title", detail: "d ``` e", file: "main.js" }] };
+    await reviewVersion(out, "demo", "1.0.0", reviewerOf(hostile), { model: "test-model", rubric });
+    const md = await readFile(join(vdir, "review.md"), "utf8");
+    const html = await readFile(join(vdir, "review.html"), "utf8");
+    expect(md).toContain("Automated security review of `demo@1.0.0`");
+    expect(md).toContain("### Deterministic checks");
+    // the model's text never appears outside a fence, and cannot close one early (no triple backtick inside)
+    const outside = md.split("```").filter((_, i) => i % 2 === 0).join("");
+    expect(outside).not.toContain("@someone");
+    expect(outside).not.toContain("evil.example");
+    expect(md.split("```").length % 2).toBe(1);
+    expect(html).toContain("Deterministic checks");
+    expect(md.length).toBeLessThanOrEqual(14000);
+  });
+});

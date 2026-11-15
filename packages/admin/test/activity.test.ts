@@ -5,21 +5,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { AccessProcessor, ActivityStore, publishStats } from "../src/activity";
-import { classifyClient, normalizeAudit, parseAccessLine, validNetwork, zoneOf, type RegistryEvent } from "../src/events";
+import { classifyClient, normalizeAudit, parseAccessLine, type RegistryEvent } from "../src/events";
 import { readNewLines } from "../src/tail";
 import { buildBatch, makeHecPost, SplunkForwarder, validateSplunk, type SplunkConfig } from "../src/splunk";
 import { clientViews, adoption } from "../src/views";
 import { validateConfig } from "../src/config";
 
 const OBSIDIAN_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.8.9 Chrome/132.0.6834.196 Electron/34.2.0 Safari/537.36";
-const nets = [{ cidr: "10.20.0.0/16", name: "Engineering" }, { cidr: "10.0.0.0/8", name: "Corporate" }];
-const ctx = (offset = 0) => ({ source: "access", offset, networks: nets });
+const ctx = (offset = 0) => ({ source: "access", offset });
 const line = (o: Record<string, unknown>) => JSON.stringify({ t: "2026-11-13T10:00:00+00:00", ip: "10.20.1.5", m: "GET", u: "/plugins/demo/1.0.0/main.js", s: 200, b: 1234, ua: OBSIDIAN_UA, ...o });
 
 describe("access-log parsing", () => {
-  it("turns a main.js download into an install indicator with client, zone and a stable id", () => {
+  it("turns a main.js download into an install indicator with client and a stable id", () => {
     const e = parseAccessLine(line({}), ctx(42))!;
-    expect(e).toMatchObject({ schema: 1, id: "access:42", type: "plugin.download", plugin: "demo", version: "1.0.0", file: "main.js", status: 200, install: true, zone: "Engineering", time: "2026-11-13T10:00:00.000Z" });
+    expect(e).toMatchObject({ schema: 1, id: "access:42", type: "plugin.download", plugin: "demo", version: "1.0.0", file: "main.js", status: 200, install: true, time: "2026-11-13T10:00:00.000Z" });
     expect(e.client).toMatchObject({ kind: "obsidian", version: "1.8.9", os: "windows" });
   });
 
@@ -56,16 +55,9 @@ describe("access-log parsing", () => {
     expect(parseAccessLine(line({ u: "/plugins/demo/1.0.0/main.js" }), c)).toBeNull();
   });
 
-  it("classifies clients and maps addresses to zones (first match wins, IPv4-mapped unwrapped)", () => {
+  it("classifies clients", () => {
     expect(classifyClient("om/0.2.0 (win)")).toMatchObject({ kind: "om", version: "0.2.0" });
     expect(classifyClient("curl/8.0")).toMatchObject({ kind: "other" });
-    expect(zoneOf("10.20.1.5", nets)).toBe("Engineering");
-    expect(zoneOf("10.99.0.1", nets)).toBe("Corporate");
-    expect(zoneOf("::ffff:10.20.3.3", nets)).toBe("Engineering");
-    expect(zoneOf("192.168.0.1", nets)).toBeUndefined();
-    expect(zoneOf("not an ip", nets)).toBeUndefined();
-    expect(validNetwork({ cidr: "10.0.0.0/33", name: "x" })).toBe(false);
-    expect(validNetwork({ cidr: "10.0.0.0/8", name: "x" })).toBe(true);
   });
 
   it("wraps admin audit lines in the same envelope", () => {
@@ -114,7 +106,7 @@ describe("activity store and processor", () => {
   async function fixture() {
     const d = await mkdtemp(join(tmpdir(), "om-act-"));
     const log = join(d, "access.log"), state = join(d, "state", "activity.json");
-    return { d, log, state, proc: () => new AccessProcessor({ logFile: log, stateFile: state, networks: nets }) };
+    return { d, log, state, proc: () => new AccessProcessor({ logFile: log, stateFile: state }) };
   }
   const dl = (ip: string, plugin: string, version: string, extra: Record<string, unknown> = {}) => line({ ip, u: `/plugins/${plugin}/${version}/main.js`, ...extra });
 
@@ -216,7 +208,7 @@ describe("Splunk HEC forwarding", () => {
     const accessLog = join(d, "access.log"), auditLog = join(d, "audit.jsonl");
     await writeFile(accessLog, "");
     await writeFile(auditLog, "");
-    const mk = async () => new SplunkForwarder(cfg, { accessLog, auditLog, stateFile: join(d, "state", "splunk.json"), networks: nets, host: "h1" }, await makeHecPost(cfg, env));
+    const mk = async () => new SplunkForwarder(cfg, { accessLog, auditLog, stateFile: join(d, "state", "splunk.json"), host: "h1" }, await makeHecPost(cfg, env));
     return { d, hec, cfg, accessLog, auditLog, mk };
   }
   const dl = (n: number) => line({ ip: `10.0.0.${n}`, u: "/plugins/demo/1.0.0/main.js" });
@@ -230,7 +222,7 @@ describe("Splunk HEC forwarding", () => {
     expect(s.hec.seen[0].auth).toBe("Splunk tok-SECRET-123");
     const first = JSON.parse(s.hec.seen[0].body);
     expect(first).toMatchObject({ time: Date.parse("2026-11-13T10:00:00+00:00") / 1000, host: "h1", sourcetype: "om:test", index: "om" });
-    expect(first.event).toMatchObject({ type: "plugin.download", install: true, zone: "Corporate" });
+    expect(first.event).toMatchObject({ type: "plugin.download", install: true });
     expect(JSON.parse(s.hec.seen[1].body).event).toMatchObject({ type: "admin.sync.start", who: "alice" });
     expect(buildBatch([{ time: "2026-11-13T10:00:00Z" }], { url: "u", tokenEnv: "x" }, "h")).not.toContain("\"index\"");
   });
@@ -295,7 +287,6 @@ describe("Splunk HEC forwarding", () => {
     await expect(makeHecPost({ url: "https://s", tokenEnv: "MISSING" }, {})).rejects.toThrow(/MISSING/);
     const base = { registryConfig: "r", auditLog: "a", allowInsecureHttp: true, password: { usersFile: "u" } };
     expect(validateConfig({ ...base, stats: { publish: true } }).join()).toMatch(/needs accessLog/);
-    expect(validateConfig({ ...base, accessLog: "/l", networks: [{ cidr: "bad", name: "x" }] }).join()).toMatch(/networks/);
     expect(validateConfig({ ...base, accessLog: "/l", stats: { publish: true, minCount: 5 }, splunk: { url: "https://s", tokenEnv: "T" } })).toEqual([]);
   });
 });

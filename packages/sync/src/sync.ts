@@ -5,11 +5,12 @@ import { addEntry, promoteStaged, type PublishPolicy } from "./catalog";
 import type { ProviderConfig } from "./reviewers";
 import { listReleases, RateLimitError, throwFor, type Fetcher, type NormalRelease } from "./providers";
 import { parseRepoRef, resolveSources, sameRepo, type Source, type SourceConfig } from "./sources";
+import { retainedVersions, type Retain } from "./retention";
 import {
   compareSemver, validateManifest, type IndexEntry, type PluginManifest, type VersionEntry,
 } from "@om/shared";
 
-export interface RepoConfig { /** owner/name on the default server, or a full web address / host/path for a configured source (see sources.ts). */ repo: string; pinVersions?: string[]; /** Mirror only the newest N eligible releases (overrides Config.maxVersions). */ maxVersions?: number; }
+export interface RepoConfig { /** owner/name on the default server, or a full web address / host/path for a configured source (see sources.ts). */ repo: string; pinVersions?: string[]; /** Mirror only the newest N eligible releases (overrides Config.maxVersions and the retain policy). */ maxVersions?: number; /** Which releases to mirror (see retention.ts); false mirrors every eligible release. Overrides Config.retain. */ retain?: Retain | false; }
 export interface ReviewConfig extends ProviderConfig {
   enabled?: boolean;
   /** provider "claude-code": full path to the Claude Code executable. */
@@ -28,8 +29,10 @@ export interface Config {
   /** Extra git servers repositories may come from; only these hosts are ever contacted. */
   sources?: SourceConfig[];
   outDir: string;
-  /** Default cap on newest releases mirrored per repo; omit for no cap. */
+  /** Explicit cap on newest releases mirrored per repo. When set it is used instead of the retain policy. */
   maxVersions?: number;
+  /** Which releases to mirror when no maxVersions is set: the newest few patches, minors and majors (defaults 3, 3, 2). false mirrors every eligible release. */
+  retain?: Retain | false;
   /** Which versions clients can see: all (default), reviewed-pass, or approved. Others are staged until they qualify. */
   publishPolicy?: PublishPolicy;
   /** Optional automated review of newly mirrored versions (needs ANTHROPIC_API_KEY in the environment). */
@@ -75,12 +78,15 @@ export async function syncRegistry(cfg: Config, f: Fetcher, log: (line: string) 
       const releases: NormalRelease[] = await listReleases(f, src, parsed.ref.path, 100);
       const max = rc.maxVersions ?? cfg.maxVersions;
       let taken = 0;
+      const policy = max || rc.pinVersions || rc.retain === false || (rc.retain === undefined && cfg.retain === false) ? undefined : { ...(cfg.retain || {}), ...(rc.retain || {}) };
+      const keep = policy ? retainedVersions(releases.filter((r) => !r.draft && !r.prerelease).map((r) => r.tag.replace(/^v/, "")), policy) : undefined;
       const ignored = releases.filter((r) => r.draft || r.prerelease).length;
-      log(`${rc.repo}: ${releases.length} release(s) on ${src.type === "gitlab" ? "GitLab" : "GitHub"}` + (ignored ? `, ${ignored} pre-release/draft ignored` : "") + (max ? `, newest ${max} considered` : ""));
+      log(`${rc.repo}: ${releases.length} release(s) on ${src.type === "gitlab" ? "GitLab" : "GitHub"}` + (ignored ? `, ${ignored} pre-release/draft ignored` : "") + (max ? `, newest ${max} considered` : keep ? `, keeping ${keep.size} by the retain policy` : ""));
       for (const rel of releases) {
         if (rel.draft || rel.prerelease) continue;
         const tagVer = rel.tag.replace(/^v/, "");
         if (rc.pinVersions && !rc.pinVersions.includes(tagVer)) { log(`  - ${rel.tag}: not in pinVersions, left out`); continue; }
+        if (keep && !keep.has(tagVer)) { log(`  - ${rel.tag}: outside the retain policy, left out`); continue; }
         if (max && taken++ >= max) { log(`  - older releases from ${rel.tag} on are beyond maxVersions (${max}), left out`); break; }
         const label = `${rc.repo}@${rel.tag}`;
         try {

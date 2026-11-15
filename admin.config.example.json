@@ -29,16 +29,6 @@
   "signerQueue": "/signq",
   "auditLog": "/audit/admin-audit.jsonl",
   "accessLog": "/logs/access.log",
-  "networks": [
-    {
-      "cidr": "10.20.0.0/16",
-      "name": "Engineering"
-    },
-    {
-      "cidr": "10.0.0.0/8",
-      "name": "Corporate"
-    }
-  ],
   "stats": {
     "publish": true,
     "windowDays": 30,

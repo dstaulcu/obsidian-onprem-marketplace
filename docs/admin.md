@@ -4,7 +4,7 @@
 > container setup has been run once on Docker Desktop (build, mTLS login, sync, nginx log read, `stats.json`), but:
 > nothing has been tried against a real Splunk; real Obsidian and `om` user agents have not been checked against the
 > parser (only an Obsidian-style one I supplied); Docker Desktop shows every client as the bridge address
-> (`172.18.0.1`), so zones and distinct counts are not meaningful there; and the dashboard page has not been viewed in
+> (`172.18.0.1`), so addresses and distinct counts are not meaningful there; and the dashboard page has not been viewed in
 > a browser. Expect rough edges and do not expose it beyond a test network yet.
 
 **Wording.** *Marketplace* is the product people see: the Obsidian plugin, the web page and this dashboard. *Registry* is the technical file store
@@ -178,10 +178,7 @@ repository and runs a sync.
 
 ## Reporting findings to the plugin's repository
 
-A reviewed version with verdict `findings` or `fail` gets a **Report issue** link. It opens the plugin repository's new-issue page with a
-short prefilled title and text (the verdict and a link to the full report) in a new tab. You read it, edit it and post it under your own
-GitHub login: nothing is sent from the admin and no token is involved. The text never contains model output, because that is derived
-from untrusted code. The link is built from the repository recorded in `index.json` (shape-checked) and the GitHub web address, which
+A reviewed version with verdict `findings` or `fail` gets a **Report issue** button. It opens the plugin repository's new-issue page in a new tab with the review as text: the plugin's manifest details, which checks hit and where, the hosts referenced, and the model's summary and findings, so whoever reads the issue does not need access to this registry. You read it, edit it and post it under your own login: nothing is sent from the admin and no token is involved. Everything that came from the plugin or the model is untrusted, so it appears only inside code fences (links, images and @mentions have no effect) and the text is capped. The address of a new-issue page holds only about 7 KB, so a longer text is cut there and the whole text is copied to your clipboard to paste. The text comes from `review.md`, written next to `review.html` when the review is made; reviews made before this feature have none until you Review them again (the issue then carries only the verdict). The link is built from the repository recorded in `index.json` (shape-checked) and the GitHub web address, which
 defaults to the host of `githubApiBase` (`api.github.com` becomes `https://github.com`); set `githubWebBase` in the admin config to
 override it for an on-prem server. Consider whether a public repository is the right place for a security finding before posting it.
 
@@ -305,9 +302,8 @@ from it. `deploy/nginx-om.conf` (mounted by `docker-compose.yml`) writes that lo
 | Successful `GET plugins/<id>/<version>/main.js` | Indicator of an **install or update** (`install: true` in the event). |
 | `GET index.json` / `plugins/<id>/versions.json` | A client **checked in**. |
 | User agent | Obsidian's desktop agent normally includes its version and OS; `om` is recognised if it sends `om/<version>`. Anything else is "other". |
-| `networks` | Optional IPv4 table (`{ "cidr": "10.20.0.0/16", "name": "Engineering" }`) turning addresses into zone labels. |
 
-The dashboard shows known clients (last seen, client, OS, zone, address), a plugin x version table of what clients
+The dashboard shows known clients (last seen, client, OS, address), a plugin x version table of what clients
 **last fetched** (labelled latest / behind / unapproved / not in registry by joining with the registry), and recent
 events. **This is inferred state.** The server cannot see what is installed or enabled; a failed download, a shared
 office address or a copied URL all distort it. Treat it as operational insight, never as proof, and never as input to
@@ -328,7 +324,7 @@ exist only in the admin-only client table, never in anything the registry web se
 | `OM_AUDIT_LOG_DAYS` | 14 | Daily audit log files kept. Raise it if you must answer who did what further back. |
 | `OM_LOG_MAX_SIZE` | 50M | Rotate early once a log passes this size (`100k`, `50M`, `1G`). |
 
-Invalid values (0, text) fall back to the default with a warning in `docker compose logs logrotate`, so a typo cannot delete your logs. Total disk use is roughly retention days times daily volume. Docker's own container output is capped at 3 x 10 MB per service. Dashboard counts and last-seen times live in `<stateDir>/activity.json` and are not affected by rotation. Without Splunk, the retention above is all the raw request history you have. The reader detects a changed inode, a smaller file or changed leading bytes and restarts at the new content; lines written between its last pass (10 s) and a rotation are lost, so the access log is not a guaranteed record. Behind Docker Desktop, `$remote_addr` is often the bridge gateway for every client; check what you see from another machine before relying on zones or distinct counts.
+Invalid values (0, text) fall back to the default with a warning in `docker compose logs logrotate`, so a typo cannot delete your logs. Total disk use is roughly retention days times daily volume. Docker's own container output is capped at 3 x 10 MB per service. Dashboard counts and last-seen times live in `<stateDir>/activity.json` and are not affected by rotation. Without Splunk, the retention above is all the raw request history you have. The reader detects a changed inode, a smaller file or changed leading bytes and restarts at the new content; lines written between its last pass (10 s) and a rotation are lost, so the access log is not a guaranteed record. Behind Docker Desktop, `$remote_addr` is often the bridge gateway for every client; check what you see from another machine before relying on addresses or distinct counts.
 
 ### Published popularity stats
 
@@ -369,7 +365,7 @@ Display it as "approx." and never use it for trust. (The marketplace listing doe
   prints Splunk's answer; the dashboard's Forwarding line shows events sent, last success and the last error.
 
 Event fields (`schema: 1`; names are a contract, new fields may be added but existing ones are not renamed):
-`id, time, type (plugin.download | catalog.check | admin.*), plugin, version, file, status, bytes, install, client{kind,version,os,ua}, addr, zone`.
+`id, time, type (plugin.download | catalog.check | admin.*), plugin, version, file, status, bytes, install, client{kind,version,os,ua}, addr`. There are deliberately no network zones: the address is forwarded as is, so mapping addresses to sites or departments is left to the downstream log system (for example a Splunk lookup).
 
 ## Security model
 

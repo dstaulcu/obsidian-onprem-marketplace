@@ -2,7 +2,6 @@
   "githubApiBase": "https://api.github.com",
   "tokenEnv": "GITHUB_TOKEN",
   "outDir": "registry",
-  "maxVersions": 5,
   "review": {
     "enabled": false,
     "model": "claude-sonnet-5-5",

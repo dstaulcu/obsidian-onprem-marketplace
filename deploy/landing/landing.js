@@ -1,6 +1,6 @@
 // Registry landing page. Everything from the registry (index.json, stats.json, downloads.json) is untrusted text: it is only ever
 // shown with textContent, and the few values that become links are shape-checked first. Settings come from landing.json,
-// which the admin controls: nominateUrl, sourceBase (https only), pinned (plugin ids shown first).
+// which the admin controls: nominateUrl, projectUrl (https; where the documentation and issues links point), sourceBase (https only), pinned (plugin ids shown first).
 (async () => {
   const $ = (id) => document.getElementById(id);
   const get = async (path) => { try { const r = await fetch(path, { cache: "no-cache" }); return r.ok ? await r.json() : null; } catch { return null; } };
@@ -56,6 +56,7 @@
   if (typeof cfg.keyHelp === "string" && cfg.keyHelp.trim()) $("keyhelp").textContent = cut(cfg.keyHelp, 300);
   if (isHttps(cfg.keyUrl)) { $("keylink").href = cfg.keyUrl; $("keylink").hidden = false; }
   if (typeof cfg.toolHint === "string" && cfg.toolHint.trim()) $("toolhint").textContent = cut(cfg.toolHint, 300);
+  if (isHttps(cfg.projectUrl)) { const u = cfg.projectUrl.replace(/[/]+$/, ""); $("projdocs").href = u + "/tree/main/docs"; $("projissues").href = u + "/issues"; }
   if (typeof cfg.contact === "string" && cfg.contact.trim()) $("contact").textContent = cut(cfg.contact, 300);
   $("copycmds").addEventListener("click", async () => {
     const b = $("copycmds"); try { await navigator.clipboard.writeText($("cmds").textContent); b.textContent = "Copied"; } catch { b.textContent = "Select the text and copy"; }

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { hostname } from "node:os";
-import { normalizeAudit, parseAccessLine, type Network } from "./events";
+import { normalizeAudit, parseAccessLine } from "./events";
 import { readJson, readNewLines, writeJsonAtomic, type Cursor } from "./tail";
 
 /**
@@ -90,7 +90,7 @@ export interface ForwarderStatus {
 }
 interface ForwarderState { access: Cursor | null; audit: Cursor | null; sent: number }
 
-export interface ForwarderDeps { accessLog?: string; auditLog: string; stateFile: string; networks: Network[]; basePath?: string; host?: string }
+export interface ForwarderDeps { accessLog?: string; auditLog: string; stateFile: string; basePath?: string; host?: string }
 
 export class SplunkForwarder {
   private st: ForwarderState = { access: null, audit: null, sent: 0 };
@@ -127,7 +127,7 @@ export class SplunkForwarder {
         const events: Record<string, unknown>[] = [];
         for (const l of r.lines) {
           const e = s === "access"
-            ? parseAccessLine(l.text, { source: "access", offset: l.offset, networks: this.d.networks, basePath: this.d.basePath }) as Record<string, unknown> | null
+            ? parseAccessLine(l.text, { source: "access", offset: l.offset, basePath: this.d.basePath }) as Record<string, unknown> | null
             : normalizeAudit(l.text, "audit", l.offset);
           if (e) events.push(e);
         }

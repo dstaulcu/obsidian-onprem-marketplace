@@ -215,6 +215,18 @@ export function createHandler(d: Deps): RequestListener {
         json(res, 202, { job });
         return;
       }
+      const it = method === "GET" ? /^[/]api[/]plugins[/]([^/]+)[/]([^/]+)[/]issue-text$/.exec(path) : null;
+      if (it) {
+        // The review as plain text for pasting into an issue (written next to review.html when the review was made).
+        const [, pid, pver] = it.map((x) => { try { return decodeURIComponent(x); } catch { return ""; } });
+        if (!isValidPluginId(pid) || !isSafeVersion(pver)) throw new HttpError(400, "invalid plugin or version");
+        const rc = await loadRc(d);
+        let text = "";
+        try { text = await readFile(join(rc.outDir, "plugins", pid, pver, "review.md"), "utf8"); } catch { /* reviews made before this feature have none */ }
+        if (!text) throw new HttpError(404, "this review has no text version; run Review on it again to create one");
+        json(res, 200, { text });
+        return;
+      }
       if (method === "GET" && path === "/api/rubric") {
         // The rubric the admin reviews with: what it checks now, and the earlier versions it has seen (for comparing).
         const rc = await loadRc(d);

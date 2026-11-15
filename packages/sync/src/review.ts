@@ -113,7 +113,48 @@ h1{font-size:1.4rem;margin:0 0 4px}h2{font-size:1.05rem;margin:28px 0 8px;border
 td:first-child{color:var(--mut);width:11em;white-space:nowrap}code{font:13px ui-monospace,monospace;word-break:break-all}
 li{margin:6px 0}.sev{font-weight:600;text-transform:uppercase;font-size:.75rem}.high{color:var(--bad)}.medium{color:var(--warn)}.low{color:var(--mut)}`;
 
-export function renderReport(r: ReviewRecord["review"], id: string, version: string, stat: StaticReport, model: ModelOutput | null, note?: string, coverage = "full"): string {
+/** The manifest fields worth showing a reviewer, as short plain text. Everything in a manifest is written by the plugin's author, so it is shortened and stripped of control characters. */
+const MANIFEST_FIELDS = ["name", "id", "version", "author", "authorUrl", "description", "minAppVersion", "isDesktopOnly", "fundingUrl"] as const;
+const plain = (v: unknown, n: number) => String(v ?? "").replace(/[^\n -~\u00a0-\uffff]/g, "").replace(/\s+/g, " ").trim().slice(0, n);
+export function manifestFacts(manifestJson: string): [string, string][] {
+  let m: Record<string, unknown>;
+  try { m = JSON.parse(manifestJson) as Record<string, unknown>; } catch { return []; }
+  if (!m || typeof m !== "object") return [];
+  const out: [string, string][] = [];
+  for (const k of MANIFEST_FIELDS) if (m[k] !== undefined && m[k] !== "") out.push([k, plain(m[k], k === "description" ? 500 : 200)]);
+  return out;
+}
+
+/**
+ * The same report as plain text (Markdown) for pasting into an issue, so whoever reads the issue does not have to open the registry.
+ * Everything that came from the plugin (manifest, code snippets) or from the model is untrusted, so it only ever appears inside code
+ * fences (no links, images, mentions or HTML take effect) with backticks removed, and the whole text is capped.
+ */
+export function renderIssueText(r: ReviewRecord["review"], id: string, version: string, stat: StaticReport, model: ModelOutput | null, facts: [string, string][], note?: string, coverage = "full"): string {
+  const fence = (t: string) => "```\n" + t.replace(/`/g, "'") + "\n```";
+  const L: string[] = [];
+  L.push(`Automated security review of \`${id}@${version}\`: **${r.verdict}**`, "");
+  L.push(`Reviewer ${r.type}, model ${plain(r.model, 60)}, rubric \`${plain(r.rubricVersion, 60)}\`, reviewed ${plain(r.reviewedAt, 40)}. Coverage: ${coverage}.`);
+  L.push("This is evidence for a human decision, not a guarantee of safety.", "");
+  if (facts.length) L.push("### Plugin manifest", fence(facts.map(([k, v]) => k + ": " + v).join("\n")), "");
+  const hit = stat.checked.filter((c) => c.count);
+  L.push("### Deterministic checks", hit.length ? hit.map((c) => `- **${c.severity}**: ${plain(c.title, 120)} (${c.count} hit${c.count > 1 ? "s" : ""})`).join("\n") : "No check found anything.", `${stat.checked.length - hit.length} of ${stat.checked.length} checks clear.`, "");
+  if (stat.findings.length) {
+    L.push("### Where the checks hit");
+    for (const fd of stat.findings) L.push(`${plain(fd.rule, 80)} (${fd.severity}, ${fd.count} hit(s))`, fence(fd.samples.slice(0, 3).map((x) => `line ${x.line}: ${plain(x.snippet, 160)}`).join("\n")));
+    L.push("");
+  }
+  L.push(`Hosts referenced: ${stat.hosts.length ? stat.hosts.slice(0, 20).map((h) => plain(h, 100)).join(", ") : "none"}`, "");
+  L.push("### Model review");
+  if (!model) L.push(`No valid model output (${plain(note ?? "error", 200)}). Treated as an error, not a pass.`);
+  else {
+    L.push(`Model verdict: **${model.verdict}**`, fence(plain(model.summary, 1500)));
+    for (const fd of model.findings.slice(0, 15)) L.push(`- **${fd.severity}**: ${plain(fd.title, 150)}${fd.file ? " (" + plain(fd.file, 100) + ")" : ""}`, fence(plain(fd.detail, 600)));
+  }
+  return L.join("\n").slice(0, 14000);
+}
+
+export function renderReport(r: ReviewRecord["review"], id: string, version: string, stat: StaticReport, model: ModelOutput | null, note?: string, coverage = "full", facts: [string, string][] = []): string {
   const row = (k: string, v: string) => `<tr><td>${k}</td><td>${v}</td></tr>`;
   const H: string[] = [
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`,
@@ -126,7 +167,9 @@ export function renderReport(r: ReviewRecord["review"], id: string, version: str
     row("Reviewer", esc(r.type)), row("Model", esc(r.model)), row("Rubric version", esc(r.rubricVersion)),
     row("Coverage", esc(coverage === "full" ? "complete main.js source shown to the model" : coverage === "delegated" ? "DELEGATED: the harness read the plugin files itself with file tools; what it actually read cannot be verified" : "PARTIAL: model saw scan excerpts only, not the whole bundle")),
     row("Scope", r.scope.map(esc).join(", ")), row("Reviewed at", esc(r.reviewedAt)), row("Prompt sha256", `<code>${r.promptSha256}</code>`),
-    `</table><h2>Deterministic checks</h2>`,
+    `</table>`,
+    ...(facts.length ? [`<h2>Plugin manifest</h2><p class="note">Written by the plugin's author; shown as text.</p><table>`, ...facts.map(([k, v]) => row(esc(k), esc(v))), `</table>`] : []),
+    `<h2>Deterministic checks</h2>`,
   ];
   H.push(`<p class="note">Rubric <code>${esc(r.rubricVersion)}</code>: ${stat.checked.length} checks applied to main.js.</p>`);
   H.push(`<table>`);
@@ -221,12 +264,14 @@ export async function reviewVersion(outDir: string, id: string, version: string,
     type: "claude-code+static", model: modelName, rubricVersion: rubric, promptSha256: sha(prompt), scope, verdict,
     reportPath: "review.html", reportSha256: "", reviewedAt: new Date().toISOString(), ...(cost !== undefined ? { costUsd: cost } : {}),
   };
-  const md = renderReport(review, id, version, stat, model, note, coverage);
+  const facts = manifestFacts(manifest);
+  const md = renderReport(review, id, version, stat, model, note, coverage, facts);
   review.reportSha256 = sha(md);
   const rec: ReviewRecord = { schema: 1, id, version, sha256: actual, review };
   const bytes = Buffer.from(JSON.stringify(rec, null, 2), "utf8");
   await mkdir(vdir, { recursive: true });
   await writeFile(join(vdir, "review.html"), md);
+  await writeFile(join(vdir, "review.md"), renderIssueText(review, id, version, stat, model, facts, note, coverage));
   await writeFile(recPath, bytes);
   if (opts.privatePem) await writeFile(recPath + ".sig", signBytes(opts.privatePem, bytes));
   return { status: "reviewed", verdict, id, version };

@@ -62,7 +62,7 @@ async function buildForwarder(cfg: AdminConfig): Promise<SplunkForwarder | null>
   if (!cfg.splunk) return null;
   const post = await makeHecPost(cfg.splunk, process.env);
   const stateDir = cfg.stateDir ?? join(dirname(cfg.auditLog), "state");
-  return new SplunkForwarder(cfg.splunk, { accessLog: cfg.accessLog, auditLog: cfg.auditLog, stateFile: join(stateDir, "splunk.json"), networks: cfg.networks ?? [], basePath: cfg.basePath }, post);
+  return new SplunkForwarder(cfg.splunk, { accessLog: cfg.accessLog, auditLog: cfg.auditLog, stateFile: join(stateDir, "splunk.json"), basePath: cfg.basePath }, post);
 }
 
 async function main() {
@@ -94,7 +94,7 @@ async function main() {
     // Background work: tail the access log into the dashboard store, forward to Splunk, publish counts-only stats.json.
     // Each runs on its own cursor and never throws, so a Splunk outage cannot stall the dashboard or the API.
     const stateDir = cfg.stateDir ?? join(dirname(cfg.auditLog), "state");
-    const activity = cfg.accessLog ? new AccessProcessor({ logFile: cfg.accessLog, stateFile: join(stateDir, "activity.json"), networks: cfg.networks ?? [], basePath: cfg.basePath }) : undefined;
+    const activity = cfg.accessLog ? new AccessProcessor({ logFile: cfg.accessLog, stateFile: join(stateDir, "activity.json"), basePath: cfg.basePath }) : undefined;
     const forwarder = await buildForwarder(cfg);
     const loadRc = async () => { const c = JSON.parse(await readFile(cfg.registryConfig, "utf8")) as Config; resolveSources(c, cfg.githubWebBase); return c; };
     try { await loadRc(); } catch (e) { console.error("registry config: " + (e as Error).message); process.exit(1); }

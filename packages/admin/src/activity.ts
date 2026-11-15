@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { parseAccessLine, type Network, type RegistryEvent } from "./events";
+import { parseAccessLine, type RegistryEvent } from "./events";
 import { readJson, readNewLines, writeJsonAtomic, type Cursor } from "./tail";
 
 /**
@@ -17,7 +17,7 @@ const RECENT = 200;
 
 export interface ClientRow {
   key: string; first: string; last: string; kind: string; version?: string; os?: string; ua: string;
-  addr: string; zone?: string; checks: number; plugins: Record<string, { version: string; time: string }>;
+  addr: string; checks: number; plugins: Record<string, { version: string; time: string }>;
 }
 interface PluginDay { all: Set<string>; ver: Map<string, Set<string>> }
 interface Persisted {
@@ -45,7 +45,7 @@ export class ActivityStore {
     let row = this.clients.get(key);
     if (!row) {
       if (this.clients.size >= MAX_CLIENTS) this.evictOldest();
-      row = { key, first: ev.time, last: ev.time, kind: ev.client.kind, version: ev.client.version, os: ev.client.os, ua: ev.client.ua, addr: ev.addr, zone: ev.zone, checks: 0, plugins: {} };
+      row = { key, first: ev.time, last: ev.time, kind: ev.client.kind, version: ev.client.version, os: ev.client.os, ua: ev.client.ua, addr: ev.addr, checks: 0, plugins: {} };
       this.clients.set(key, row);
     }
     if (ev.time > row.last) row.last = ev.time;
@@ -124,7 +124,7 @@ export class ActivityStore {
   }
 }
 
-export interface AccessOptions { logFile: string; stateFile: string; networks: Network[]; basePath?: string }
+export interface AccessOptions { logFile: string; stateFile: string; basePath?: string }
 
 /**
  * Tails the access log into an ActivityStore. Aggregates and the read cursor are saved in ONE atomic file, so a crash
@@ -151,7 +151,7 @@ export class AccessProcessor {
       this.lastError = null;
       let n = 0;
       for (const l of r.lines) {
-        const ev = parseAccessLine(l.text, { source: "access", offset: l.offset, networks: this.o.networks, basePath: this.o.basePath });
+        const ev = parseAccessLine(l.text, { source: "access", offset: l.offset, basePath: this.o.basePath });
         if (ev) { this.store.apply(ev); n++; }
       }
       const moved = !this.store.cursor || this.store.cursor.offset !== r.next.offset || this.store.cursor.ino !== r.next.ino || this.store.cursor.head !== r.next.head;

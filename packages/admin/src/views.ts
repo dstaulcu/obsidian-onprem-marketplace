@@ -8,14 +8,14 @@ import type { PluginState } from "./state";
 export type FetchStatus = "latest" | "behind" | "unapproved" | "not in registry";
 
 export interface ClientView {
-  key: string; first: string; last: string; kind: string; version?: string; os?: string; ua: string; addr: string; zone?: string; checks: number;
+  key: string; first: string; last: string; kind: string; version?: string; os?: string; ua: string; addr: string; checks: number;
   plugins: { id: string; version: string; time: string; status: FetchStatus; latest?: string }[];
 }
 
 export function clientViews(rows: ClientRow[], state: PluginState[]): ClientView[] {
   const byId = new Map(state.map((p) => [p.id, p]));
   return rows.map((r) => ({
-    key: r.key, first: r.first, last: r.last, kind: r.kind, version: r.version, os: r.os, ua: r.ua, addr: r.addr, zone: r.zone, checks: r.checks,
+    key: r.key, first: r.first, last: r.last, kind: r.kind, version: r.version, os: r.os, ua: r.ua, addr: r.addr, checks: r.checks,
     plugins: Object.entries(r.plugins).sort(([a], [b]) => (a < b ? -1 : 1)).map(([id, p]) => {
       const reg = byId.get(id);
       const cur = reg?.versions.find((v) => v.version === p.version);

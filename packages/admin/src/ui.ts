@@ -11,6 +11,8 @@ export const INDEX_HTML = `<!doctype html>
 <header class="top">
   <div class="brand"><span class="logo" aria-hidden="true"></span><h1>Marketplace admin</h1></div>
   <span class="spacer"></span>
+  <a class="btn ghost" href="https://github.com/dstaulcu/obsidian-onprem-marketplace/tree/main/docs" target="_blank" rel="noopener noreferrer">Docs</a>
+  <a class="btn ghost" href="https://github.com/dstaulcu/obsidian-onprem-marketplace/issues" target="_blank" rel="noopener noreferrer">Issues</a>
   <span id="who" class="who" hidden></span>
   <button id="theme" class="btn ghost" type="button" title="Switch between automatic, light and dark">Theme: auto</button>
   <button id="logout" class="btn ghost" type="button" hidden>Sign out</button>
@@ -35,7 +37,6 @@ export const INDEX_HTML = `<!doctype html>
       <button id="review" class="btn" type="button">Review all</button>
       <span id="running" class="running" hidden><span class="spinner" aria-hidden="true"></span><span id="runningtext"></span></span>
       <span class="spacer"></span>
-      <button id="rubricchip" class="btn ghost" type="button" hidden title="The rubric (set of checks) reviews are made against. Click for details."></button>
       <span id="updated" class="muted small"></span>
       <button id="refresh" class="btn ghost" type="button">Refresh</button>
     </div>
@@ -123,7 +124,7 @@ code{background:var(--surface2);border:1px solid var(--border);border-radius:4px
 .brand{display:flex;align-items:center;gap:.6rem}.brand h1{font-size:1.05rem}
 .logo{width:22px;height:22px;border-radius:6px;background:var(--accent);position:relative;display:inline-block}
 .logo::after{content:"";position:absolute;left:5px;top:5px;width:12px;height:12px;border:2px solid var(--accent-text);border-radius:3px}
-.who{font-size:12.5px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);padding:.2rem .6rem;border-radius:999px}
+a.btn{text-decoration:none;display:inline-flex;align-items:center}.who{font-size:12.5px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);padding:.2rem .6rem;border-radius:999px}
 
 main{max-width:1100px;margin:0 auto;padding:1.25rem}
 .btn{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.45rem .9rem;cursor:pointer;box-shadow:var(--shadow)}
@@ -258,6 +259,7 @@ function renderCards() {
     if (S.activity && S.activity.enabled) box.append(card("Installs, recent", S.activity.events.filter((e) => e.install).length, "downloads of main.js in the latest events"));
   }
   const last = S.jobs[0]; if (last) box.append(card("Last job", last.kind, last.status + ", " + rel(last.started), last.status === "failed" ? "bad" : ""));
+  const staleTab = document.querySelector('[data-tab="rubric"] .count'); if (staleTab) { staleTab.textContent = String(stale); staleTab.hidden = !stale; }
   const waitTab = document.querySelector('[data-tab="plugins"] .count'); if (waitTab) { waitTab.textContent = String(waiting); waitTab.hidden = !waiting; }
 }
 
@@ -326,10 +328,10 @@ async function runJob(path, body) {
   await showPlugins(); await showJobs(); renderCards(); await showRubric();
 }
 
-// "Report an issue": opens the repository's new-issue page with a short prefilled text. The person reviews and posts it under
-// their own GitHub identity; nothing is sent from here and no token is involved. The text holds only the verdict and a link to
-// the report, never model output (which is derived from untrusted code). The repository comes from index.json but is shape-checked
-// by the server, and the address is built here from the configured GitHub web address.
+// "Report issue": opens the repository's new-issue page with the review as plain text (the admin's server returns it from review.md,
+// where everything from the plugin or the model sits inside code fences). The person reads it and posts it under their own identity;
+// nothing is sent from here and no token is involved. The repository comes from index.json but is shape-checked by the server, and the
+// address is built here from the configured web address.
 const REPO_OK = /^[A-Za-z0-9_.:-]+([/][A-Za-z0-9_.-]+)+$/;
 // A stored repository name is owner/name on the default server, or host/path on another configured server. Where its web page is
 // comes from the server list the admin configured, never from the name itself.
@@ -341,19 +343,35 @@ function repoWeb(repo) {
   const web = safeUrl(src ? src.webBase : S.githubWebBase); if (!web) return null;
   return { web: web.replace(/[/]+$/, ""), path: other ? repo.slice(first.length + 1) : repo, type: src ? src.type : "github" };
 }
+// The new-issue page takes its text from the address, which servers cut off somewhere around 8 KB, so the address carries the first
+// part and the whole text is copied to the clipboard for pasting.
+const ISSUE_URL_MAX = 6500;
 function issueLink(p, v) {
   const verdict = v.review && ["findings", "fail"].includes(v.review.verdict) ? v.review.verdict : null;
   const w = repoWeb(p.repo); if (!verdict || !w || !SAFE_ID.test(p.id) || !SAFE_VER.test(v.version)) return null;
-  const rep = S.registryUrl && (S.registryUrl.startsWith("http://") || S.registryUrl.startsWith("https://")) ? S.registryUrl.replace(/[/]+$/, "") + "/plugins/" + p.id + "/" + v.version + "/review.html" : "";
-  const title = "Security review of " + p.id + " " + v.version + ": " + verdict;
   const NL = String.fromCharCode(10);
-  const body = "An automated security review of " + p.id + "@" + v.version + " came back with: " + verdict + "." + NL + NL + (rep ? "Full report: " + rep + NL + NL : "") +
-    "Please look at the findings and let us know if they are expected or will be addressed." + NL + NL + "(Opened from the marketplace admin; edit this text before posting.)";
-  const a = h("a", "issuelink", "Report issue"); a.href = w.type === "gitlab"
-    ? w.web + "/" + w.path + "/-/issues/new?issue%5Btitle%5D=" + encodeURIComponent(title) + "&issue%5Bdescription%5D=" + encodeURIComponent(body)
-    : w.web + "/" + w.path + "/issues/new?title=" + encodeURIComponent(title) + "&body=" + encodeURIComponent(body);
-  a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = "Open a prefilled issue on " + p.repo + " (you review and post it yourself)";
-  return a;
+  const title = "Security review of " + p.id + " " + v.version + ": " + verdict;
+  const fallback = "An automated security review of " + p.id + "@" + v.version + " came back with: " + verdict + "." + NL + NL + "Please look at the findings and let us know if they are expected or will be addressed.";
+  const b = h("button", "btn small issuelink", "Report issue"); b.type = "button";
+  b.title = "Opens a prefilled issue on " + p.repo + " with this review's text (you read it and post it yourself)";
+  b.onclick = async () => {
+    const win = window.open("about:blank", "_blank"); if (win) { try { win.opener = null; } catch {} }
+    const r = await api("/api/plugins/" + encodeURIComponent(p.id) + "/" + encodeURIComponent(v.version) + "/issue-text");
+    const text = r.status === 200 && r.data && typeof r.data.text === "string" ? r.data.text : null;
+    const note = "(Opened from the marketplace admin; the text below is from an automated review. Read it before posting.)";
+    let body = (text ? text + NL + NL : fallback + NL + NL) + note;
+    const q = (t, d) => w.type === "gitlab" ? "issue%5B" + t + "%5D=" + encodeURIComponent(d) : t + "=" + encodeURIComponent(d);
+    const base = w.type === "gitlab" ? w.web + "/" + w.path + "/-/issues/new?" : w.web + "/" + w.path + "/issues/new?";
+    let sent = body; let cut = false;
+    while ((base + q("title", title) + "&" + q(w.type === "gitlab" ? "description" : "body", sent)).length > ISSUE_URL_MAX) { sent = sent.slice(0, Math.floor(sent.length * 0.85)); cut = true; }
+    if (cut) sent += NL + NL + "[cut to fit the address; the rest was copied to your clipboard]";
+    const url = base + q("title", title) + "&" + q(w.type === "gitlab" ? "description" : "body", sent);
+    let copied = false; if (cut) { try { await navigator.clipboard.writeText(body); copied = true; } catch {} }
+    if (win) win.location.href = url; else say("Your browser blocked the new tab; allow pop-ups for this page and try again.", "bad");
+    if (!text) say("This review has no text version yet, so the issue only has the verdict. Run Review on it again to include the details.", "warn");
+    else if (cut) say(copied ? "The issue text was too long for the address; the first part is prefilled and the whole text is on your clipboard." : "The issue text was too long for the address; the first part is prefilled. Copy the rest from the report.", "warn");
+  };
+  return b;
 }
 
 // ---- notes drawer
@@ -414,7 +432,7 @@ async function showClients() {
   ad.append(data.adoption.length ? h("div", "standalone", tbl(["Plugin", "Version", "Clients", "Status"], data.adoption.map((a) => [a.id, h("span", "mono", a.version), a.clients, badge(a.status, statusKind(a.status))]))) : empty("No downloads seen yet", "Activity appears once a client fetches a plugin from the registry."));
   box.append(h("h2", "section", "Known clients"));
   if (!data.clients.length) { box.append(empty("No clients yet")); return; }
-  box.append(h("div", "standalone", tbl(["Last seen", "Client", "OS", "Zone", "Address", "Last fetched", "Checks"], data.clients.map((c) => [when(c.last), clientName(c), c.os || "", c.zone || "", h("span", "mono", c.addr),
+  box.append(h("div", "standalone", tbl(["Last seen", "Client", "OS", "Address", "Last fetched", "Checks"], data.clients.map((c) => [when(c.last), clientName(c), c.os || "", h("span", "mono", c.addr),
     h("span", null, ...c.plugins.map((p) => h("span", "chip" + (p.status === "latest" ? "" : p.status === "behind" ? " c-warn" : " c-bad"), p.id + "@" + p.version + (p.status === "latest" ? "" : " (" + p.status + ")")))), c.checks]))));
   applyFilter($("q-clients"), box, "tbody tr");
 }
@@ -422,9 +440,9 @@ async function showActivity() {
   const { data } = await api("/api/activity"); S.activity = data; const box = $("activity"); box.replaceChildren();
   if (!data || !data.enabled) { box.append(empty("Client activity is off", "Set accessLog in the admin config (see docs/admin.md).")); return; }
   if (!data.events.length) { box.append(empty("No activity yet")); return; }
-  box.append(h("div", "standalone", tbl(["Time", "Event", "Plugin", "Version", "File", "HTTP", "Client", "Zone"], data.events.map((e) => [when(e.time),
+  box.append(h("div", "standalone", tbl(["Time", "Event", "Plugin", "Version", "File", "HTTP", "Client"], data.events.map((e) => [when(e.time),
     e.install ? badge("install / update", "ok", "Successful download of main.js") : badge(e.type === "catalog.check" ? "check" : e.type, "muted"), e.plugin || "", h("span", "mono", e.version || ""), e.file || "",
-    badge(String(e.status), e.status >= 400 ? "bad" : "muted"), clientName(e.client), e.zone || ""]))));
+    badge(String(e.status), e.status >= 400 ? "bad" : "muted"), clientName(e.client)]))));
 }
 
 // Links to the source repository come from the admin config, never from registry data. Only http(s) addresses are used.
@@ -436,9 +454,8 @@ const proposeUrl = (base, title, body) => base + "?title=" + encodeURIComponent(
 const sevKind = (x) => (x === "high" ? "bad" : "warn");
 async function showRubric() {
   const { status, data } = await api("/api/rubric"); const box = $("rubric"); box.replaceChildren();
-  const chip = $("rubricchip");
-  if (status !== 200 || !data) { chip.hidden = true; box.append(empty("The rubric could not be loaded", (data && data.error) || "")); return; }
-  const cur = data.current; chip.hidden = false; chip.textContent = "Rubric " + cur.version; chip.onclick = () => selectTab("rubric");
+  if (status !== 200 || !data) { box.append(empty("The rubric could not be loaded", (data && data.error) || "")); return; }
+  const cur = data.current;
   const vs = S.plugins.flatMap((p) => p.versions), reviewed = vs.filter((v) => v.review), stale = vs.filter(isStale).length;
   box.append(h("p", null, h("strong", null, cur.version), " - " + cur.checks.length + " checks and " + cur.promptLines + " lines of model instructions. ",
     stale ? badge(stale + " of " + reviewed.length + " reviews are stale", "warn") : badge("all " + reviewed.length + " reviews are current", "ok")));
@@ -634,6 +651,7 @@ const TABS = [["plugins", "Plugins"], ["clients", "Clients"], ["activity", "Acti
 function buildTabs() {
   const box = $("tabs"); box.replaceChildren();
   for (const [id, label] of TABS) { const b = h("button", "tab", label); b.type = "button"; b.setAttribute("role", "tab"); b.dataset.tab = id;
+    if (id === "rubric") { const c = h("span", "count", "0"); c.hidden = true; c.title = "Reviews made under an older rubric"; b.append(c); }
     if (id === "plugins") { const c = h("span", "count", "0"); c.hidden = true; c.title = "Versions awaiting approval"; b.append(c); }
     b.onclick = () => selectTab(id); box.append(b); }
 }
