@@ -120,7 +120,7 @@ code{background:var(--surface2);border:1px solid var(--border);border-radius:4px
 
 .vtable table{table-layout:fixed;min-width:760px}.vtable{overflow-x:auto}.vtable th:nth-child(1){width:11%}.vtable th:nth-child(2){width:13%}.vtable th:nth-child(3){width:22%}.vtable th:nth-child(4){width:24%}.vtable td{overflow-wrap:anywhere}
 .brand h1{color:var(--text)}.top .btn{flex:none}
-.top{display:flex;align-items:center;gap:.7rem;padding:.7rem 1.25rem;min-height:3.2rem;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5}
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .7rem;padding:.7rem 1.25rem;min-height:3.2rem;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5}
 .brand{display:flex;align-items:center;gap:.6rem}.brand h1{font-size:1.05rem}
 .logo{width:22px;height:22px;border-radius:6px;background:var(--accent);position:relative;display:inline-block}
 .logo::after{content:"";position:absolute;left:5px;top:5px;width:12px;height:12px;border:2px solid var(--accent-text);border-radius:3px}
@@ -203,7 +203,7 @@ textarea{font:inherit;color:var(--text);background:var(--surface);border:1px sol
 .repores{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:.7rem 1rem;margin:.4rem 0 1rem}.repores ul{margin:.3rem 0 0 1.1rem;padding:0}
 .rubricbar{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin:.6rem 0}
 select{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.4rem .6rem;max-width:100%}
-@media (max-width:640px){main{padding:.75rem}.top{padding:.6rem .75rem}td,th{padding:.5rem .6rem}}`;
+@media (max-width:640px){main{padding:.75rem}.top{padding:.6rem .75rem}.brand h1{font-size:1rem}.who{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}td,th{padding:.5rem .6rem}}`;
 
 export const APP_JS = `(() => {
 const $ = (id) => document.getElementById(id);

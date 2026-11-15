@@ -32,3 +32,4 @@ ul.plain{list-style:none;padding:0;margin:0}
 input[type=search],select{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--border);border-radius:8px;padding:.45rem .65rem}
 input[type=search]{flex:1 1 16rem;min-width:12rem}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (max-width:520px){input[type=search]{flex-basis:100%}}
