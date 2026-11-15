@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { validNetwork, type Network } from "./events";
 import { validateSplunk, type SplunkConfig } from "./splunk";
+import { validateNominations, type NominationsConfig } from "./nominations";
 
 export interface AdminConfig {
   listen?: { host?: string; port?: number };
@@ -47,6 +48,11 @@ export interface AdminConfig {
    * writing it into the registry. Needs publicKeyFile. Leave unset to keep approving on the command line.
    */
   signerQueue?: string;
+  /**
+   * Read plugin nominations (issues labelled "nomination") from the tracker, and comment on and close them after an admin acts.
+   * The token is a dedicated one, Issues read+write on that one repository, from an env var or a file, never from this config.
+   */
+  nominations?: NominationsConfig;
   /** Stream events to Splunk HEC. The token comes from an env var or file, never from this config. */
   splunk?: SplunkConfig;
 }
@@ -68,6 +74,7 @@ export function validateConfig(c: AdminConfig): string[] {
   if (c.signerQueue !== undefined && (typeof c.signerQueue !== "string" || !c.signerQueue)) e.push("signerQueue must be a directory path");
   if (c.signerQueue && !c.publicKeyFile) e.push("signerQueue needs publicKeyFile: approvals returned by the signer are verified with it before they are used");
   if (c.reviewQueue !== undefined && (typeof c.reviewQueue !== "string" || !c.reviewQueue)) e.push("reviewQueue must be a directory path");
+  e.push(...validateNominations(c.nominations));
   if (c.stats?.publish && !c.accessLog) e.push("stats.publish needs accessLog");
   if (c.stats) {
     if (c.stats.windowDays !== undefined && !(c.stats.windowDays >= 1 && c.stats.windowDays <= 90)) e.push("stats.windowDays must be 1-90");

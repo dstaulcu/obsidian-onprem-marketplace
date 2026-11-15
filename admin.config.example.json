@@ -44,6 +44,7 @@
     "windowDays": 30,
     "minCount": 5
   },
+  "nominations": { "repo": "owner/tracker-repo", "tokenEnv": "NOMINATIONS_TOKEN" },
   "splunk": {
     "url": "https://splunk.example.internal:8088",
     "tokenEnv": "SPLUNK_HEC_TOKEN",

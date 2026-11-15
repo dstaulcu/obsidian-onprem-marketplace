@@ -43,6 +43,7 @@ services:
     environment:
       # Secrets for sync/review jobs. Prefer Docker secrets or your orchestrator's secret store in production.
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      NOMINATIONS_TOKEN: ${NOMINATIONS_TOKEN:-}
       # No ANTHROPIC_API_KEY here on purpose: reviews run in the separate reviewer container (reviewQueue in admin.config.json).
       SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:-}
     read_only: true

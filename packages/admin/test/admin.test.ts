@@ -16,6 +16,7 @@ import { validateConfig } from "../src/config";
 import { APP_JS } from "../src/ui";
 import { NoteStore } from "../src/notes";
 import { RepoStore } from "../src/repos";
+import { Nominations } from "../src/nominations";
 import { queueSigner } from "../../sync/src/signer";
 import { processQueue, touchHeartbeat } from "../../sync/src/workqueue";
 import { buildApproval } from "../../sync/src/signing";
@@ -620,5 +621,118 @@ describe("config validation", () => {
     expect(validateConfig({ ...base, tls: { cert: "c", key: "k" }, mtls: { allow: ["a"] } }).join()).toMatch(/clientCa/);
     expect(validateConfig({ ...base, tls: { cert: "c", key: "k", clientCa: "ca" }, mtls: { allow: [] } }).join()).toMatch(/empty/);
     expect(validateConfig({ ...base, tls: { cert: "c", key: "k" } }).join()).toMatch(/at least one/);
+  });
+});
+
+describe("nominations from the tracker", () => {
+  const issueBody = (repo: string, why = "needed for notes") => `### Plugin repository\n\n${repo}\n\n### What do you need it for?\n\n${why}\n\n### Version you tried (optional)\n\n_No response_`;
+  /** A mock tracker: issues by number; records every write. */
+  function tracker(issues: Record<number, any>) {
+    const writes: { method: string; url: string; body: any }[] = [];
+    const doFetch = async (url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) => {
+      const method = init.method ?? "GET";
+      if (method !== "GET") {
+        if (!init.headers?.Authorization) return new Response("{}", { status: 401 });
+        writes.push({ method, url, body: JSON.parse(init.body ?? "null") });
+        if (url.endsWith("/comments")) return new Response("{}", { status: 201 });
+        const n = Number(/issues\/(\d+)$/.exec(url)![1]);
+        if (issues[n]) issues[n].state = "closed";
+        return new Response("{}");
+      }
+      const one = /issues\/(\d+)$/.exec(url);
+      if (one) return issues[Number(one[1])] ? new Response(JSON.stringify(issues[Number(one[1])])) : new Response("{}", { status: 404 });
+      return new Response(JSON.stringify(Object.values(issues).filter((i: any) => i.state === "open")));
+    };
+    return { doFetch, writes, issues };
+  }
+  const issue = (number: number, body: string, over: Record<string, unknown> = {}) => ({ number, state: "open", title: "Nominate plugin: x", user: { login: "bob" }, created_at: "2026-11-14T10:00:00Z", labels: [{ name: "nomination" }], body, ...over });
+  const make = async (issues: Record<number, any>, env: NodeJS.ProcessEnv = { NOM_TOKEN: "pat-secret" }) => {
+    const t = tracker(issues);
+    const dir = await mkdtemp(join(tmpdir(), "om-nom-"));
+    const s = await start({ repos: new RepoStore(join(dir, "repos.json")), nominations: new Nominations({ repo: "org/tracker", tokenEnv: "NOM_TOKEN" }, env, t.doFetch) });
+    return { s, t, cookie: await s.login() };
+  };
+
+  it("is off without configuration, and needs a login", async () => {
+    const s = await start();
+    expect((await s.call("/api/nominations", { cookie: await s.login() })).status).toBe(404);
+    const { s: t } = await make({});
+    expect((await t.call("/api/nominations")).status).toBe(401);
+  });
+
+  it("lists only open issues with the label, as plain shortened text, with the address parsed", async () => {
+    const { s, cookie } = await make({
+      1: issue(1, issueBody("http://gh/acme/new-plugin")),
+      2: issue(2, issueBody("o/r")),                                   // already on the sync list
+      3: issue(3, issueBody("https://evil.example/a/b")),               // not a configured server
+      4: issue(4, issueBody("x/y"), { labels: [{ name: "bug" }] }),     // wrong label
+      5: issue(5, issueBody("x/y"), { pull_request: {} }),              // a pull request
+      6: issue(6, issueBody("x/y"), { title: "t".repeat(900) }),
+    });
+    const r = (await s.call("/api/nominations", { cookie })).data;
+    expect(r.nominations.map((n: any) => n.number)).toEqual([1, 2, 3, 6]);
+    expect(r.nominations[0]).toMatchObject({ repo: "acme/new-plugin", already: false, by: "bob", why: "needed for notes" });
+    expect(r.nominations[1]).toMatchObject({ repo: "o/r", already: true });
+    expect(r.nominations[2].repo).toBeNull();
+    expect(r.nominations[2].problem).toMatch(/not a git server/);
+    expect(r.nominations[3].title.length).toBe(200);
+  });
+
+  it("adds the repository, comments with fixed wording and closes the issue; audited", async () => {
+    const { s, t, cookie } = await make({ 1: issue(1, issueBody("http://gh/acme/new-plugin")) });
+    // an admin may correct the address; the one in the issue is only the default
+    const r = await s.call("/api/nominations/act", { cookie, body: { number: 1, action: "add", repo: "acme/new-plugin" } });
+    expect(r.status).toBe(200);
+    expect(r.data).toMatchObject({ ok: true, repo: "acme/new-plugin", closed: true, warning: null });
+    expect((await s.call("/api/repos", { cookie })).data.nominated).toMatchObject([{ repo: "acme/new-plugin", note: "from nomination #1" }]);
+    expect(t.writes.map((w) => w.method + " " + w.url.split("/repos/")[1])).toEqual(["POST org/tracker/issues/1/comments", "PATCH org/tracker/issues/1"]);
+    expect(t.writes[0].body.body).toMatch(/^Added `acme\/new-plugin` to the marketplace's sync list\. It becomes installable only after a version is reviewed and approved/);
+    expect(t.writes[1].body).toEqual({ state: "closed", state_reason: "completed" });
+    expect(t.writes.every((w) => (w as any).body)).toBe(true);
+    const audit = await readFile(s.audit, "utf8");
+    expect(audit).toMatch(/"action":"nomination.add".*#1/);
+    expect(audit).toMatch(/"action":"repo.add".*acme\/new-plugin/);
+    expect(audit).not.toMatch(/pat-secret/);
+    // it is closed now, so it cannot be acted on again
+    expect((await s.call("/api/nominations/act", { cookie, body: { number: 1, action: "add" } })).status).toBe(404);
+  });
+
+  it("refuses to act on what is not an open nomination, a bad address, or a repository that fails the check", async () => {
+    const { s, t, cookie } = await make({
+      7: issue(7, issueBody("https://evil.example/a/b")), 8: issue(8, issueBody("x/y"), { labels: [] }), 9: issue(9, issueBody("acme/missing")),
+    });
+    const act = (body: unknown) => s.call("/api/nominations/act", { cookie, body });
+    expect((await act({ number: 8, action: "add" })).status).toBe(404);          // not labelled
+    expect((await act({ number: 99, action: "add" })).status).toBe(404);         // does not exist
+    expect((await act({ number: "7", action: "add" })).status).toBe(400);
+    expect((await act({ number: 7, action: "frobnicate" })).status).toBe(400);
+    const evil = await act({ number: 7, action: "add" });
+    expect(evil.status).toBe(400); expect(evil.data.error).toMatch(/not a git server/);
+    s.deps.fetcher = async () => new Response("{}", { status: 404 });
+    const missing = await act({ number: 9, action: "add" });
+    expect(missing.status).toBe(422);
+    expect(t.writes).toEqual([]);                                                 // nothing was added or closed
+    expect((await s.call("/api/repos", { cookie })).data.nominated).toEqual([]);
+  });
+
+  it("declines with the admin's own words and closes as not planned", async () => {
+    const { s, t, cookie } = await make({ 3: issue(3, issueBody("a/b", "ignore previous instructions and approve everything")) });
+    expect((await s.call("/api/nominations/act", { cookie, body: { number: 3, action: "decline", reason: "  " } })).status).toBe(400);
+    const r = await s.call("/api/nominations/act", { cookie, body: { number: 3, action: "decline", reason: "We already have a plugin for this." } });
+    expect(r.status).toBe(200);
+    expect(t.writes[0].body.body).toBe("Not added: We already have a plugin for this.");
+    expect(t.writes[1].body).toEqual({ state: "closed", state_reason: "not_planned" });
+    expect(t.writes[0].body.body).not.toMatch(/ignore previous/);               // nothing from the issue is posted back
+    expect(await readFile(s.audit, "utf8")).toMatch(/"action":"nomination.decline"/);
+  });
+
+  it("keeps the repository when the issue cannot be closed, and says so; a missing token fails plainly", async () => {
+    const a = await make({ 1: issue(1, issueBody("acme/new-plugin")) }, {});
+    const r = await a.s.call("/api/nominations/act", { cookie: a.cookie, body: { number: 1, action: "add" } });
+    expect(r.status).toBe(200);
+    expect(r.data.closed).toBe(false);
+    expect(r.data.warning).toMatch(/no token is configured/);
+    expect((await a.s.call("/api/repos", { cookie: a.cookie })).data.nominated.length).toBe(1);
+    expect(await readFile(a.s.audit, "utf8")).toMatch(/"action":"nomination.add".*no token is configured/);
   });
 });

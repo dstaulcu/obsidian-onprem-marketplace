@@ -55,6 +55,7 @@ export const INDEX_HTML = `<!doctype html>
       <div id="clients"></div>
     </div>
     <div id="panel-activity" class="panel" role="tabpanel" hidden><div id="activity"></div></div>
+    <div id="panel-nominations" class="panel" role="tabpanel" hidden><div id="nomlist"></div></div>
     <div id="panel-repos" class="panel" role="tabpanel" hidden>
       <form id="repoform" class="repoform" autocomplete="off">
         <label for="f-repo" class="muted small">Add a repository whose releases should be mirrored</label>
@@ -197,6 +198,7 @@ textarea{font:inherit;color:var(--text);background:var(--surface);border:1px sol
 .diffline{font:12.5px/1.5 ui-monospace,SFMono-Regular,Consolas,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 .diffline.add{color:var(--ok)}.diffline.del{color:var(--bad)}
 .repoinput{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.45rem .65rem;min-width:14rem;flex:1 1 14rem}
+.nom{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.7rem 1rem;margin:.6rem 0}.nom h3{margin:0 0 .2rem;font-size:1rem}.nomwhy{white-space:pre-wrap;margin:.4rem 0}.nomrow{display:flex;gap:.5rem;flex-wrap:wrap;margin:.4rem 0;align-items:center}
 .repores{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:.7rem 1rem;margin:.4rem 0 1rem}.repores ul{margin:.3rem 0 0 1.1rem;padding:0}
 .rubricbar{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin:.6rem 0}
 select{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.4rem .6rem;max-width:100%}
@@ -533,11 +535,44 @@ async function showRepos() {
   box.append(h("p", "muted small", data.note));
   if (Array.isArray(data.sources) && data.sources.length) box.append(h("p", "muted small", "Git servers this marketplace uses: " + data.sources.map((x) => x.host + " (" + x.type + (x.isDefault ? ", default for owner/name" : "") + ")").join(", ") + ". Repositories on any other server are refused."));
 }
-function renderRepoCheck(c) {
-  const box = $("repoout"); box.replaceChildren();
+function renderRepoCheck(c, target) {
+  const box = target || $("repoout"); box.replaceChildren();
   const r = h("div", "repores", h("strong", null, c.repo + ": "), badge(c.ok ? "would be accepted" : "would not be accepted", c.ok ? "ok" : "bad"), h("p", null, c.summary));
   const ul = h("ul"); for (const x of c.releases) ul.append(h("li", null, h("span", "mono", x.tag), " ", x.ok ? badge("ok", "ok") : badge("skipped", "warn"), x.problems.length ? " " + x.problems.join("; ") : ""));
   if (c.releases.length) r.append(ul); box.append(r);
+}
+// ---- nominations: open issues on the tracker. Their text was written by whoever filed them, so it is shown as text only; the
+// repository address is re-checked on the server, and nothing is added or closed except by a click here.
+async function showNominations() {
+  const { status, data } = await api("/api/nominations"); const box = $("nomlist"); box.replaceChildren();
+  if (status !== 200 || !data) { box.append(empty("Nominations are not connected", (data && data.error) || "Set nominations in the admin config to read them from your tracker.")); return; }
+  const web = safeUrl(S.githubWebBase).replace(/[/]+$/, "");
+  box.append(h("p", "muted small", "Open issues labelled " + data.label + " on " + data.tracker + ". Adding checks the repository exactly like the Repositories tab, then comments on and closes the issue. Nothing happens without your click."));
+  if (!data.nominations.length) { box.append(empty("No open nominations", "Nothing is waiting.")); return; }
+  for (const n of data.nominations) {
+    const out = h("div"); const repoIn = h("input", "repoinput"); repoIn.value = n.repo || n.candidate || ""; repoIn.maxLength = 300; repoIn.spellcheck = false; repoIn.setAttribute("aria-label", "Repository address for nomination " + n.number);
+    const reason = h("input", "repoinput"); reason.placeholder = "Reason (posted on the issue)"; reason.maxLength = 500; reason.setAttribute("aria-label", "Reason for declining nomination " + n.number);
+    const title = h("h3", null, "#" + n.number + "  ", n.title || "(no title)");
+    const head = h("div", "nomrow", title, n.already ? badge("already on the sync list", "ok") : null, n.problem ? badge("address not usable", "warn", n.problem) : null);
+    const meta = h("div", "muted small", "by " + (n.by || "unknown") + " ", when(n.createdAt), " ", web && /^[A-Za-z0-9_.-]+[/][A-Za-z0-9_.-]+$/.test(data.tracker) ? extLink("Open the issue", web + "/" + data.tracker + "/issues/" + n.number) : null);
+    const check = h("button", "btn", "Check"); check.type = "button"; check.title = "Check the repository (adds nothing)";
+    check.onclick = async () => { check.disabled = true; try { const x = await api("/api/repos/check", { repo: repoIn.value.trim() }); if (x.status === 200) renderRepoCheck(x.data, out); else say((x.data && x.data.error) || "Failed (" + x.status + ")", "bad"); } finally { check.disabled = false; } };
+    const add = h("button", "btn primary", "Add and sync"); add.type = "button"; add.title = "Check, add to the sync list, close the issue with a fixed comment, then run a sync";
+    add.onclick = async () => { add.disabled = true; try {
+      const x = await api("/api/nominations/act", { number: n.number, action: "add", repo: repoIn.value.trim() });
+      if (x.status !== 200) { say((x.data && x.data.error) || "Failed (" + x.status + ")", "bad"); return; }
+      say("Added " + x.data.repo + (x.data.closed ? " and closed the issue. Running a sync." : ". The issue was NOT closed: " + x.data.warning), x.data.closed ? "ok" : "bad");
+      await showRepos(); await showNominations(); await runJob("/api/sync", {});
+    } finally { add.disabled = false; } };
+    const decline = confirmButton("Decline", "Post and close?", async () => {
+      if (!reason.value.trim()) { say("Give a short reason first; it is posted on the issue.", "bad"); reason.focus(); return; }
+      const x = await api("/api/nominations/act", { number: n.number, action: "decline", reason: reason.value.trim() });
+      say(x.status === 200 ? (x.data.closed ? "Declined and closed #" + n.number + "." : "Declined, but the issue was NOT closed: " + x.data.warning) : ((x.data && x.data.error) || "Failed (" + x.status + ")"), x.status === 200 && x.data.closed ? "ok" : "bad");
+      await showNominations();
+    }, true, "Post your reason on the issue and close it. Nothing is added.");
+    decline.disabled = false; decline.classList.remove("rowbtn");
+    box.append(h("div", "nom", head, meta, n.why ? h("div", "nomwhy", n.why) : null, h("div", "nomrow", repoIn, check, add), h("div", "nomrow", reason, decline), out));
+  }
 }
 async function repoAction(add) {
   const repo = $("f-repo").value.trim(); if (!repo) { $("f-repo").focus(); return; }
@@ -595,7 +630,7 @@ async function start(kind, body) {
 }
 
 // ---- tabs
-const TABS = [["plugins", "Plugins"], ["clients", "Clients"], ["activity", "Activity"], ["repos", "Repositories"], ["rubric", "Rubric"], ["forwarding", "Forwarding"], ["jobs", "Jobs"]];
+const TABS = [["plugins", "Plugins"], ["clients", "Clients"], ["activity", "Activity"], ["repos", "Repositories"], ["nominations", "Nominations"], ["rubric", "Rubric"], ["forwarding", "Forwarding"], ["jobs", "Jobs"]];
 function buildTabs() {
   const box = $("tabs"); box.replaceChildren();
   for (const [id, label] of TABS) { const b = h("button", "tab", label); b.type = "button"; b.setAttribute("role", "tab"); b.dataset.tab = id;
@@ -615,7 +650,7 @@ function initTheme() { let m = "auto"; try { m = localStorage.getItem("om-theme"
   $("theme").onclick = () => { const cur = document.documentElement.dataset.theme || "auto"; const next = cur === "auto" ? "light" : cur === "light" ? "dark" : "auto"; applyTheme(next); try { localStorage.setItem("om-theme", next); } catch {} }; }
 
 async function refreshAll() {
-  await Promise.all([showPlugins(), showClients(), showActivity(), showForwarder(), showJobs()]); await showRepos(); await showRubric();
+  await Promise.all([showPlugins(), showClients(), showActivity(), showForwarder(), showJobs()]); await showRepos(); await showNominations(); await showRubric();
   $("updated").textContent = "Updated " + new Date().toLocaleTimeString(); renderCards();
 }
 async function init() {

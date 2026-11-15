@@ -18,6 +18,7 @@ import { checkRepo, mirroredRepos } from "@om/sync/src/nominate";
 import { makeSourceFetcher } from "@om/sync/src/providers";
 import { isCanonical, parseRepoRef, resolveSources, sameRepo } from "@om/sync/src/sources";
 import type { Audit } from "./audit";
+import { NominationError, oneLine, type Nominations } from "./nominations";
 import type { AdminConfig } from "./config";
 import { Busy, JobRunner } from "./jobs";
 import { checkLogin, LoginLimiter } from "./auth/password";
@@ -34,6 +35,8 @@ export interface Deps {
   loadRegistryConfig(): Promise<Config>;
   /** Repositories added from the dashboard (merged into the sync list). Unset: the repository API answers 404. */
   repos?: RepoStore;
+  /** Plugin nominations on the tracker. Unset: the nominations API answers 404. */
+  nominations?: Nominations;
   /** Where reviews run (the queue to the reviewer container). Unset: in-process. */
   reviewOpts?: ReviewOpts;
   /** Shared triage notes. Unset: the notes API answers 404. */
@@ -350,6 +353,65 @@ export function createHandler(d: Deps): RequestListener {
           json(res, 201, { repo: e, check });
         } catch (e) { if (e instanceof RepoError) throw new HttpError(409, e.message); throw e; }
         return;
+      }
+      if (path === "/api/nominations" || path === "/api/nominations/act") {
+        if (!d.nominations) throw new HttpError(404, "reading nominations from the tracker is not enabled");
+        try {
+          if (method === "GET" && path === "/api/nominations") {
+            const base = await d.loadRegistryConfig();
+            const sources = resolveSources(base, d.cfg.githubWebBase);
+            const have = [...base.repos.map((r) => r.repo), ...(d.repos ? (await d.repos.list()).map((n) => n.repo) : [])]
+              .map((r) => { const p = parseRepoRef(r, sources); return p.ok ? p.ref.canonical : r; });
+            const items = (await d.nominations.list()).map((n) => {
+              const p = parseRepoRef(n.candidate, sources);
+              return { ...n, repo: p.ok ? p.ref.canonical : null, problem: p.ok ? null : p.reason, already: p.ok && have.some((h) => sameRepo(h, p.ref.canonical)) };
+            });
+            json(res, 200, { tracker: d.nominations.repo, label: d.nominations.label, nominations: items });
+            return;
+          }
+          if (method !== "POST") throw new HttpError(405, "use POST");
+          const body = await readJson(req);
+          const number = body.number;
+          if (typeof number !== "number" || !Number.isInteger(number) || number < 1) throw new HttpError(400, "number must be an issue number");
+          const action = body.action;
+          if (action !== "add" && action !== "decline") throw new HttpError(400, "action must be add or decline");
+          // The issue is read again now: it must still be an open nomination. What the page showed earlier is not trusted.
+          const issue = await d.nominations.get(number);
+          if (!issue) throw new HttpError(404, "that is not an open nomination any more");
+          let canonical = "", note = "";
+          if (action === "decline") {
+            note = typeof body.reason === "string" ? oneLine(body.reason, 500) : "";
+            if (!note) throw new HttpError(400, "give a short reason; it is posted on the issue");
+          } else {
+            const base = await d.loadRegistryConfig();
+            const sources = resolveSources(base, d.cfg.githubWebBase);
+            // The admin may correct the address; either way it is parsed and checked exactly like one typed on the Repositories tab.
+            const parsed = parseRepoRef(typeof body.repo === "string" && body.repo ? body.repo : issue.candidate, sources);
+            if (!parsed.ok) throw new HttpError(400, parsed.reason);
+            canonical = parsed.ref.canonical;
+            if (!d.repos) throw new HttpError(404, "adding repositories from the dashboard is not enabled");
+            const now = Date.now(); repoChecks = repoChecks.filter((t) => now - t < 60_000);
+            if (repoChecks.length >= 20) throw new HttpError(429, "too many checks; wait a minute");
+            repoChecks.push(now);
+            const rc = await loadRc(d);
+            const f = d.fetcher ?? makeSourceFetcher(resolveSources(rc, d.cfg.githubWebBase), d.env ?? process.env);
+            const check = await checkRepo(resolveSources(rc, d.cfg.githubWebBase), f, canonical, await mirroredRepos(rc.outDir));
+            if (!check.ok) throw new HttpError(422, check.summary);
+            try { await d.repos.add(who.name, canonical, base.repos.map((r) => { const p = parseRepoRef(r.repo, sources); return p.ok ? p.ref.canonical : r.repo; }), "from nomination #" + number); }
+            catch (e) { if (e instanceof RepoError) throw new HttpError(409, e.message); throw e; }
+            await d.audit.record(who.name, "repo.add", { target: canonical, note: "from nomination #" + number }, ip);
+          }
+          // The comment is fixed wording plus, for a decline, the admin's own words. Nothing from the issue or a model goes into it.
+          const text = action === "add"
+            ? "Added `" + canonical + "` to the marketplace's sync list. It becomes installable only after a version is reviewed and approved. Thanks for the nomination."
+            : "Not added: " + note;
+          let warning: string | null = null;
+          try { await d.nominations.close(number, text, action === "add" ? "completed" : "not_planned"); }
+          catch (e) { if (e instanceof NominationError) warning = e.message; else throw e; }
+          await d.audit.record(who.name, action === "add" ? "nomination.add" : "nomination.decline", { target: "#" + number, ...(canonical ? { note: canonical } : { note }), ...(warning ? { error: warning } : {}) }, ip);
+          json(res, 200, { ok: true, repo: canonical || null, closed: !warning, warning });
+          return;
+        } catch (e) { if (e instanceof NominationError) throw new HttpError(e.status, e.message); throw e; }
       }
       if (method === "GET" && path === "/api/clients") {
         if (!d.activity) { json(res, 200, { enabled: false, clients: [], adoption: [] }); return; }

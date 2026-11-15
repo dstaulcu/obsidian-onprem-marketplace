@@ -131,6 +131,16 @@ GitHub issue form (`.github/ISSUE_TEMPLATE/nominate-plugin.yml`) in the reposito
 https address; point it at your own tracker). The nominator needs no registry account. Nothing about a nomination is automatic: an admin
 decides.
 
+**For admins: the Nominations tab.** Set `nominations` in the admin config (see `admin.config.example.json`): the tracker repository
+(`owner/name`) and where its token comes from (`tokenEnv` or `tokenFile`; `NOMINATIONS_TOKEN` in `.env` reaches the container). Use a **dedicated token
+with Issues read and write on that one repository** (not the token used to read releases). The tab lists open issues labelled `nomination` (the
+issue form sets it, but GitHub applies a form's label only if that label already exists in the tracker repository, so create a `nomination` label there first). For each you can **Check** the repository, **Add and sync** (checks exactly like the Repositories tab, adds it, comments with fixed
+wording and closes the issue as completed) or **Decline** with a reason you type (comments and closes as not planned). Nothing happens without
+your click. Issue text was written by whoever filed it, so it is shown as plain text, only the repository address is taken from it (and
+re-checked on the server), and nothing from an issue is ever posted back. The issue is read again when you act, so a closed or relabelled one
+cannot be acted on. If the repository is added but the comment or close fails (for example a token without write access), the dashboard says
+so and the repository stays added. Reads and writes to the tracker are audited (`nomination.add`, `nomination.decline`).
+
 **For admins: the Repositories tab.** Enter the repository's web address (or `owner/name` for the default server) and press **Check** to see, without changing anything, whether sync would accept the
 repository: it exists (and the registry's token can see it), it has a published release (drafts and pre-releases are ignored), the release
 carries `main.js` and `manifest.json`, the manifest is valid, and the tag equals the manifest version. The three newest releases are tried
