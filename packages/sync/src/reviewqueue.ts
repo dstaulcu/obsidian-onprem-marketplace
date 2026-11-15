@@ -22,12 +22,14 @@ export interface QueueReviewer extends Reviewer {
 }
 
 /** Admin side: a Reviewer that hands the prompt to the reviewer container and waits for the answer. Never spawns anything. */
-export function queueReviewer(queue: string, o: Omit<CallOpts, "waitMs"> & { waitMs?: number } = {}): QueueReviewer {
+export function queueReviewer(queue: string, o: Omit<CallOpts, "waitMs"> & { waitMs?: number; maxPromptChars?: number } = {}): QueueReviewer {
   const rv = (async (prompt: string) => {
     const j = await queueCall(queue, { prompt }, { ...o, what: "reviewer", waitMs: o.waitMs ?? DEFAULT_WAIT_MS });
     return { output: j.output, model: clip(j.model, 100), costUsd: typeof j.costUsd === "number" && Number.isFinite(j.costUsd) ? j.costUsd : undefined };
   }) as QueueReviewer;
   rv.ready = () => queueReady(queue, "reviewer", o.staleMs ?? HEARTBEAT_STALE_MS);
+  // The admin builds the prompt, so it has to know how much the reviewer's model can take.
+  if (o.maxPromptChars) rv.maxPromptChars = o.maxPromptChars;
   return rv;
 }
 

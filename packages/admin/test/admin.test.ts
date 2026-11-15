@@ -91,6 +91,7 @@ describe("authentication and request safety", () => {
   it("refuses unauthenticated API access and records the attempt", async () => {
     const s = await start();
     expect((await s.call("/api/plugins")).status).toBe(401);
+    expect((await s.call("/healthz")).status).toBe(200); // for probes: open, and says nothing about the system
     expect((await s.call("/api/sync", { method: "POST" })).status).toBe(401);
     const me = await s.call("/api/me");
     expect(me.status).toBe(401);

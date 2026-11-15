@@ -18,6 +18,8 @@ export interface OpenAiConfig {
   /** Ask the server for JSON mode via response_format. Off by default because not every server supports it. */
   jsonMode?: boolean;
   timeoutMs?: number;
+  /** The most characters the model can take in one request (its context, in characters, with room for the answer). Larger plugins are then reviewed from excerpts. Omit for no limit. */
+  maxPromptChars?: number;
 }
 export interface WrapperConfig {
   command: string;
@@ -96,7 +98,7 @@ export function wrapperReviewer(w: WrapperConfig, model: string): Reviewer {
 }
 
 export function openAiReviewer(o: OpenAiConfig, model: string, fetchFn: typeof fetch = fetch, env: NodeJS.ProcessEnv = process.env): Reviewer {
-  return async (prompt) => {
+  const r: Reviewer = async (prompt) => {
     const key = o.apiKeyEnv ? env[o.apiKeyEnv] : undefined;
     if (o.apiKeyEnv && !key) throw new Error(`env var ${o.apiKeyEnv} is not set`);
     const res = await fetchFn(`${o.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
@@ -118,6 +120,8 @@ export function openAiReviewer(o: OpenAiConfig, model: string, fetchFn: typeof f
     if (typeof text !== "string") throw new Error("response had no message content");
     return { output: extractJson(text), model: j.model ?? model };
   };
+  if (o.maxPromptChars) r.maxPromptChars = o.maxPromptChars;
+  return r;
 }
 
 export function makeReviewer(c: ProviderConfig): Reviewer {

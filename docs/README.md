@@ -26,7 +26,7 @@ Obsidian's built-in plugin browser cannot be pointed at a custom registry, so th
 
 ## Hosting the registry with an admin web UI (experimental)
 For a container deployment, `docker compose up` runs the static registry and an admin service (mTLS and/or password
-login, trigger sync/review, see status; approvals stay on the CLI). See [Admin service](admin.md).
+login, trigger sync/review, see status; approvals stay on the CLI). See [Admin service](admin.md); for running it on a cluster (volumes, secrets per container, networking, an OpenAI-compatible model service, what is unverified) see [Deploying](deploy.md).
 
 ## Provisioning vaults with the `om` CLI
 For scripted setup (for example from a vault quickstart), `om` installs and checks plugins in a vault folder without Obsidian running:

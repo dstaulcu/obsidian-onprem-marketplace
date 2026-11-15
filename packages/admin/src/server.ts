@@ -122,6 +122,7 @@ export function createHandler(d: Deps): RequestListener {
     const path = new URL(req.url ?? "/", "http://x").pathname;
     const method = req.method ?? "GET";
     try {
+      if (method === "GET" && path === "/healthz") { res.writeHead(200, { "Content-Type": "text/plain" }).end("ok\n"); return; } // for probes; says nothing about the system
       if (method === "GET" && path === "/") { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(INDEX_HTML); return; }
       if (method === "GET" && path === "/app.js") { res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" }).end(APP_JS); return; }
       if (method === "GET" && path === "/app.css") { res.writeHead(200, { "Content-Type": "text/css; charset=utf-8" }).end(APP_CSS); return; }

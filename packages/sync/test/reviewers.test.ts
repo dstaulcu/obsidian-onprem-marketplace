@@ -69,6 +69,10 @@ describe("openai-compatible reviewer", () => {
     expect(out.model).toBe("served-model");
     expect(parseModelOutput(out.output)?.verdict).toBe("pass");
   });
+  it("tells the review how much the model can take, so a small-context model gets excerpts", () => {
+    expect(openAiReviewer({ baseUrl: "http://x", maxPromptChars: 30000 }, "m", reply("x"), {}).maxPromptChars).toBe(30000);
+    expect(openAiReviewer({ baseUrl: "http://x" }, "m", reply("x"), {}).maxPromptChars).toBeUndefined();
+  });
   it("fails safely: missing key, HTTP error, empty reply", async () => {
     await expect(openAiReviewer({ baseUrl: "http://x", apiKeyEnv: "NOPE" }, "m", reply("x"), {})("p")).rejects.toThrow(/NOPE is not set/);
     await expect(openAiReviewer({ baseUrl: "http://x" }, "m", reply("x", false), {})("p")).rejects.toThrow(/500/);

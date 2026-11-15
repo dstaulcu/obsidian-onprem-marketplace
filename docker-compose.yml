@@ -60,6 +60,7 @@ services:
       - ./registry-data:/usr/share/nginx/html:ro
       - ./deploy/nginx-om.conf:/etc/nginx/conf.d/default.conf:ro
       - ./deploy/landing:/usr/share/nginx/landing:ro
+      - ./config/nginx-extra:/etc/nginx/om-extra:ro
       - ./config/public-key.txt:/usr/share/nginx/keys/public-key.txt:ro
       - logs:/var/log/om
     read_only: true
@@ -76,6 +77,9 @@ services:
     build:
       context: .
       dockerfile: deploy/reviewer/Dockerfile
+      # With an OpenAI-compatible model service the Claude Code CLI is not needed: set INSTALL_CLAUDE_CODE=false (in .env) to leave it out.
+      args:
+        INSTALL_CLAUDE_CODE: ${INSTALL_CLAUDE_CODE:-true}
     user: "${OM_UID:-10001}:${OM_GID:-10001}"
     depends_on:
       init:
@@ -84,7 +88,10 @@ services:
       - queue:/queue
       - ./config/registry.config.json:/config/registry.config.json:ro
     environment:
+      # Either of these, depending on review.provider in registry.config.json: ANTHROPIC_API_KEY for claude-code, or the variable
+      # named by review.openai.apiKeyEnv (REVIEW_API_KEY here) for an OpenAI-compatible service.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      REVIEW_API_KEY: ${REVIEW_API_KEY:-}
     read_only: true
     tmpfs: ["/tmp"]
     cap_drop: [ALL]

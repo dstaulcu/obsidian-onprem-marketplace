@@ -105,7 +105,7 @@ async function main() {
     if (cfg.reviewQueue) {
       const bad = validateReviewQueue((await loadRc()).review);
       if (bad.length) { bad.forEach((b) => console.error("review queue: " + b)); return 1; }
-      const q = queueReviewer(cfg.reviewQueue);
+      const q = queueReviewer(cfg.reviewQueue, { maxPromptChars: (await loadRc()).review?.openai?.maxPromptChars });
       reviewOpts = { reviewer: q, preflight: () => q.ready() };
     }
     if (cfg.signerQueue && !publicKey) { console.error("signer: signerQueue is set but no public key is available to verify its answers"); return 1; }

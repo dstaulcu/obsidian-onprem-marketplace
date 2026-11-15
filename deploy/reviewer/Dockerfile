@@ -9,8 +9,10 @@ RUN npm run build -w @om/sync
 
 FROM node:22-slim
 # Pin this for reproducible builds, e.g. --build-arg CLAUDE_CODE_VERSION=<version>. "latest" is only the default.
+# INSTALL_CLAUDE_CODE=false skips it, for sites that use an OpenAI-compatible service (review.provider "openai-compatible").
 ARG CLAUDE_CODE_VERSION=latest
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && npm cache clean --force
+ARG INSTALL_CLAUDE_CODE=true
+RUN if [ "$INSTALL_CLAUDE_CODE" = "true" ]; then npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && npm cache clean --force; fi
 WORKDIR /app
 # .mjs because the bundle is an ES module
 COPY --from=build /src/packages/sync/dist/cli.js ./om-sync.mjs
