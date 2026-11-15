@@ -303,6 +303,8 @@ from it. `deploy/nginx-om.conf` (mounted by `docker-compose.yml`) writes that lo
 | `GET index.json` / `plugins/<id>/versions.json` | A client **checked in**. |
 | User agent | Obsidian's desktop agent normally includes its version and OS; `om` is recognised if it sends `om/<version>`. Anything else is "other". |
 
+The Clients tab also has a **Compatibility with Obsidian versions** table: Obsidian reports its own version in its user agent, so for Obsidian clients seen in the last 30 days it shows, per plugin, how many cannot run the newest release (its `minAppVersion` is newer than their Obsidian) and the newest approved release they still can. That is the release to keep available so they keep an upgrade path. `om` clients report no Obsidian version and are left out, and a user agent can be faked, so this informs your decisions and never gates anything.
+
 The dashboard shows known clients (last seen, client, OS, address), a plugin x version table of what clients
 **last fetched** (labelled latest / behind / unapproved / not in registry by joining with the registry), and recent
 events. **This is inferred state.** The server cannot see what is installed or enabled; a failed download, a shared

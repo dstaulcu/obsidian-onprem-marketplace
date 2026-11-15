@@ -7,6 +7,8 @@ import { readdir } from "node:fs/promises";
 
 export interface VersionState {
   version: string; published: string; staged: boolean;
+  /** Oldest Obsidian this version runs on, from its manifest (as recorded in versions.json). */
+  minAppVersion?: string;
   review: { verdict: string; signed: boolean; valid: boolean | null; /** which rubric version the review was made under */ rubricVersion: string | null; model: string | null } | null;
   approval: { ok: boolean; reason?: string; by?: string; override?: string } | null;
 }
@@ -68,7 +70,7 @@ export async function registryState(outDir: string, publicKey: string): Promise<
           approval = r.ok ? { ok: true, by: r.approval.approvedBy, override: r.approval.override } : { ok: false, reason: r.reason };
         }
       }
-      versions.push({ version: v.version, published: v.published, staged, review, approval });
+      versions.push({ version: v.version, published: v.published, staged, minAppVersion: typeof v.minAppVersion === "string" ? v.minAppVersion.slice(0, 20) : undefined, review, approval });
     }
     out.push({ id, repo: repos[id] ?? "", versions });
   }

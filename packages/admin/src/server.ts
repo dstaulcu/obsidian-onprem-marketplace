@@ -27,7 +27,7 @@ import type { Authenticator, Identity } from "./auth/types";
 import { registryState } from "./state";
 import type { AccessProcessor } from "./activity";
 import type { SplunkForwarder } from "./splunk";
-import { adoption, clientViews } from "./views";
+import { adoption, clientViews, compatibility } from "./views";
 import { APP_CSS, APP_JS, INDEX_HTML } from "./ui";
 
 export interface Deps {
@@ -428,8 +428,9 @@ export function createHandler(d: Deps): RequestListener {
       if (method === "GET" && path === "/api/clients") {
         if (!d.activity) { json(res, 200, { enabled: false, clients: [], adoption: [] }); return; }
         const rc = await loadRc(d);
-        const views = clientViews(d.activity.store.clientRows(), await registryState(rc.outDir, d.publicKey));
-        json(res, 200, { enabled: true, note: "Derived from registry downloads: shows the last version each client fetched, not what is installed or enabled.", error: d.activity.lastError, clients: views, adoption: adoption(views) });
+        const st = await registryState(rc.outDir, d.publicKey);
+        const views = clientViews(d.activity.store.clientRows(), st);
+        json(res, 200, { enabled: true, ...compatibility(d.activity.store.clientRows(), st), note: "Derived from registry downloads: shows the last version each client fetched, not what is installed or enabled.", error: d.activity.lastError, clients: views, adoption: adoption(views) });
         return;
       }
       if (method === "GET" && path === "/api/activity") {

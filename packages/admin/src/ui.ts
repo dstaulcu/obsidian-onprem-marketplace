@@ -430,6 +430,15 @@ async function showClients() {
   note.textContent = (data.note || "") + (data.error ? "  Problem reading the log: " + data.error : "");
   ad.append(h("h2", "section", "Last fetched, by plugin and version"));
   ad.append(data.adoption.length ? h("div", "standalone", tbl(["Plugin", "Version", "Clients", "Status"], data.adoption.map((a) => [a.id, h("span", "mono", a.version), a.clients, badge(a.status, statusKind(a.status))]))) : empty("No downloads seen yet", "Activity appears once a client fetches a plugin from the registry."));
+  ad.append(h("h2", "section", "Compatibility with Obsidian versions"));
+  ad.append(h("p", "muted small", "Obsidian reports its own version, so this uses clients seen in the last 30 days (om does not report one, and a user agent can be faked, so treat it as a planning aid). A plugin whose newest release needs a newer Obsidian than some clients run leaves those clients without an upgrade; the last column is the newest approved release they can still run, which is the one to keep available."));
+  if (!data.compat || !data.compat.length) ad.append(empty("No Obsidian clients to compare yet", "Appears once Obsidian clients with a known version have fetched from the registry."));
+  else {
+    ad.append(h("p", "muted small", "Obsidian versions seen: " + data.obsidianVersions.map((o) => o.version + " (" + o.clients + ")").join(", ")));
+    ad.append(h("div", "standalone", tbl(["Plugin", "Newest release", "Needs Obsidian", "Clients that cannot run it", "Newest release they can run"], data.compat.map((c) => [c.id, h("span", "mono", c.latest), h("span", "mono", c.needs),
+      c.stranded ? badge(c.stranded + " of " + c.obsidianClients, "warn", "Oldest Obsidian seen: " + c.oldest) : badge("none", "ok"),
+      c.stranded ? (c.fallback ? h("span", "mono", c.fallback) : badge("none approved", "bad", "No approved release runs on the oldest Obsidian seen")) : h("span", "muted", "-")]))));
+  }
   box.append(h("h2", "section", "Known clients"));
   if (!data.clients.length) { box.append(empty("No clients yet")); return; }
   box.append(h("div", "standalone", tbl(["Last seen", "Client", "OS", "Address", "Last fetched", "Checks"], data.clients.map((c) => [when(c.last), clientName(c), c.os || "", h("span", "mono", c.addr),
