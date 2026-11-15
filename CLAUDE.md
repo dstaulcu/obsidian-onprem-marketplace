@@ -17,6 +17,7 @@ npm workspaces (`packages/*`). Run from the repo root:
 - `npm install`
 - `npm run build` — builds in order: `@om/shared` → `@om/sync` → `@om/cli` → `onprem-marketplace` (order matters; the others depend on shared)
 - `npm test` — `vitest run` (tests live in `packages/sync/test/`: `sync`, `signing`, `review`, `reviewers`, `rubric`, `policy`; no linter is configured)
+- `npm run ui-check` — drives the landing page and the admin dashboard in the installed Edge/Chrome (`playwright-core`, no browser download), clicks every tab, saves screenshots to `ui-check-out/` (gitignored) and fails on script/console errors or failed requests. Needs the containers up and a TEST login in `config/test-login.txt` (`user:` / `password:` lines); local addresses only. Not part of `npm test`.
 - Single test: `npx vitest run packages/sync/test/sync.test.ts -t "adds versions"`
 - Run sync: `node packages/sync/dist/cli.js [registry.config.json]` (needs the env var named by `tokenEnv`; exits 1 if any errors)
 - Install plugin into a vault: `node scripts/bootstrap-vault.mjs <vaultPath> <registryUrl> [publicKeyFile] [off|warn|require-signed]`
