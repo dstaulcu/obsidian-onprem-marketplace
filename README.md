@@ -105,14 +105,17 @@ node scripts/bootstrap-vault.mjs <vaultPath> http://127.0.0.1:8080 keys/public-k
 `om` (`npm run build:exe` produces `dist/om.exe`) is the user-side command line: `om vaults`, `om init --registry <address> --vault <name>`,
 `om marketplace`, `om list`, `om install`, `om update`. See [Overview](docs/README.md).
 
-Want to see it first? The [`demo/`](demo) folder is a playbook for an offline walkthrough with a fake GitHub, a benign plugin and an
-inert, deliberately suspicious one, and it holds a recording of the client plugin lifecycle. **It is a draft that has not yet been run end to end**
-(the command-line scripts predate the dashboard and the user page, and the container track is not built yet); the to-do list is in
-[`demo/README.md`](demo/README.md).
+Want to see it first? The [`demo/`](demo) folder is a scripted walkthrough you can run on your own machine: `npm run demo:reset`, then
+`npm run demo` (needs Docker Desktop and Edge or Chrome). A browser, driven by Playwright, opens with a tour of this project, then plays
+eleven acts against an isolated container stack with a fake GitHub, a benign plugin and an inert, deliberately suspicious one. A caption
+bar explains each step, the public page is shown before and after each approval, and the run is recorded as one video. Presenter
+controls (pause, back, next, skip, speed) let you talk over it. Details, options and known gaps are in
+[`demo/README.md`](demo/README.md), which also holds a recording of the client plugin lifecycle. The older command-line scripts are
+still there but have not been re-run since the dashboard was added.
 
 ## Status
 
-**Experimental** (pre-release tags such as `v0.3.0-experimental.7`). Unit-tested (`npm test`), and the user page and dashboard have a
+**Experimental** (pre-release tags such as `v0.3.0-experimental.9`). Unit-tested (`npm test`), and the user page and dashboard have a
 browser smoke test (`npm run ui-check`). It runs under Docker/Rancher Desktop; it has **not** yet been run on Kubernetes, against an
 on-prem GitHub or GitLab, managed endpoints, an on-prem review model, or a real Splunk. [Deploying](docs/deploy.md) lists exactly
 what is unverified.
