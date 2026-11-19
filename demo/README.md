@@ -8,6 +8,41 @@ GitHub. Every step has an on-screen caption saying what is happening and why, an
 - **shady-sync** (1.0.0): deliberately suspicious-looking and **inert** (nothing in it is ever called). It trips several checks and
   even contains a prompt-injection attempt aimed at the reviewing model. It never reaches users.
 
+## What it looks like
+
+Screenshots from a run of the demo (regenerated with `npm run demo -- --publish-screenshots`). The bar at the bottom is the caption.
+
+**Before approval, a user sees nothing.** Both plugins are mirrored and reviewed, but held back until an admin approves them.
+
+![The public marketplace page before any approval: no plugins are published yet](screenshots/02-public-page-before-approval.png)
+
+**The admin sees the review results.** hello-notes passes; shady-sync fails. Neither is approved, so neither reaches users.
+
+![The admin dashboard: hello-notes passes review, shady-sync fails, all held back](screenshots/03-dashboard-reviewed.png)
+
+**The full review report** lists the plugin's manifest, every fixed check that fired, the exact lines that tripped them, and the model's
+findings, including a prompt-injection attempt it was told to ignore.
+
+![The review report for shady-sync](screenshots/04-review-report-shady-sync.png)
+
+**A failed plugin cannot be approved without a written reason; a clean one is signed by a separate container.**
+
+![Approving shady-sync requires a written reason](screenshots/05-override-required.png)
+![hello-notes approved](screenshots/06-approved.png)
+
+**After approval, users see exactly the approved plugin and nothing else.**
+
+![The public marketplace page after approving hello-notes: only hello-notes is offered](screenshots/07-public-page-after-approval.png)
+
+**Admins see which clients fetched what, and the rubric the reviews are made against.**
+
+![The Clients tab](screenshots/08-clients.png)
+![The Rubric tab](screenshots/09-rubric.png)
+
+The introduction opens on this project's own GitHub page, for example the diagram of how a plugin gets from a repository to a user:
+
+![The project's README, showing how a plugin gets to a user](screenshots/01-how-it-works.png)
+
 ## Run it
 
 Needs Node 20+, Docker Desktop (running) and Edge or Chrome. From the repository root:
@@ -31,6 +66,7 @@ Run `demo:reset` before every full run: the acts change the registry, so a secon
 | `--no-intro` | skip the GitHub tour (it is the only part that needs the internet; it is skipped automatically if github.com is unreachable) |
 | `--no-captions` / `--no-video` / `--light` | no caption bar / no recording / light mode |
 | `--gif` | also write `demo.gif` (needs `ffmpeg` on the PATH, for example `winget install Gyan.FFmpeg`) |
+| `--publish-screenshots` | after a complete, clean run, copy a curated set of screenshots into `demo/screenshots/` (committed; shown below and in the top-level README) |
 | `--bail` | stop at the first act that fails |
 
 Each act checks what it should produce, and the exit code is 1 if any check fails.
@@ -101,31 +137,11 @@ the check on the client.
   reports this as a known gap, not a failure.
 - Not covered: publishing `om.exe` to the downloads (the Get started tab), nominations, and the Splunk tab.
 
-## Command-line track (no containers, no dashboard)
-
-The original host-only scripts: good for reviews, approving on the command line, installing and tampering, but there is no dashboard or
-marketplace page, so the dashboard acts cannot be shown this way. Not re-run since the dashboard, containers and `om` were added.
-
-```powershell
-npm install; npm run build
-.\demo\00-preflight.ps1          # checks Node, builds, Claude Code, ANTHROPIC_API_KEY, free ports, fixtures
-.\demo\01-reset.ps1              # new registry folder and signing key, fresh demo vault with the plugin and public key pinned
-.\demo\02-start-servers.ps1      # fake GitHub on :9090, the registry on :8080
-node packages/sync/dist/cli.js demo/registry.config.json
-node packages/sync/dist/cli.js review --all --config demo/registry.config.json
-node packages/sync/dist/cli.js approve hello-notes@1.0.0 --key demo/keys/signing-key.pem --registry demo/registry
-.\demo\tamper.ps1                # changes a file on the "server" after approval; -Undo restores it
-```
-
-Open `demo\vault` in Obsidian once and turn Restricted mode off before presenting.
-
 ## To do
 
-- [x] Dashboard track built, and all eleven acts run headless (`--pause 0`).
 - [ ] One paced, visible run in front of a person, then adjust caption wording and timing.
-- [ ] Run the command-line track end to end and fix whatever has drifted (flags, config names, ports).
-- [ ] Publish a recording of the new walkthrough here (the one below shows only the Obsidian plugin lifecycle).
-- [ ] Update the "Want to see it first?" line in the top-level README.
+- [ ] Publish a recording of the walkthrough here (`--gif`); the one below shows only the Obsidian plugin lifecycle.
+- [ ] Optionally run the reviews against a real model (the demo uses recorded answers).
 
 ## Client plugin lifecycle
 

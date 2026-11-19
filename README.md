@@ -110,12 +110,18 @@ Want to see it first? The [`demo/`](demo) folder is a scripted walkthrough you c
 eleven acts against an isolated container stack with a fake GitHub, a benign plugin and an inert, deliberately suspicious one. A caption
 bar explains each step, the public page is shown before and after each approval, and the run is recorded as one video. Presenter
 controls (pause, back, next, skip, speed) let you talk over it. Details, options and known gaps are in
-[`demo/README.md`](demo/README.md), which also holds a recording of the client plugin lifecycle. The older command-line scripts are
-still there but have not been re-run since the dashboard was added.
+[`demo/README.md`](demo/README.md), which also holds a recording of the client plugin lifecycle.
+
+<table>
+<tr>
+<td width="50%"><a href="demo/README.md#what-it-looks-like"><img src="demo/screenshots/02-public-page-before-approval.png" alt="The public marketplace page before approval: nothing is offered"></a><br><sub>Before approval: users see nothing.</sub></td>
+<td width="50%"><a href="demo/README.md#what-it-looks-like"><img src="demo/screenshots/07-public-page-after-approval.png" alt="The public marketplace page after approval: only hello-notes is offered"></a><br><sub>After approval: exactly the approved plugin.</sub></td>
+</tr>
+</table>
 
 ## Status
 
-**Experimental** (pre-release tags such as `v0.3.0-experimental.9`). Unit-tested (`npm test`), and the user page and dashboard have a
+**Experimental** (pre-release tags such as `v0.3.0-experimental.10`). Unit-tested (`npm test`), and the user page and dashboard have a
 browser smoke test (`npm run ui-check`). It runs under Docker/Rancher Desktop; it has **not** yet been run on Kubernetes, against an
 on-prem GitHub or GitLab, managed endpoints, an on-prem review model, or a real Splunk. [Deploying](docs/deploy.md) lists exactly
 what is unverified.

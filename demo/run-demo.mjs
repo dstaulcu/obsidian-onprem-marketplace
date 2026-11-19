@@ -2,7 +2,7 @@
 // caption per act, a screenshot per act in demo/demo-out/, and a check of what each act should produce. Acts that happen in Obsidian
 // use the `om` command-line installer on a demo vault instead (Playwright cannot drive Obsidian itself).
 //   node demo/stack.mjs reset      first: a clean stack (nothing synced)
-//   node demo/run-demo.mjs [--pause 2500] [--headless] [--only 3,4] [--bail] [--light] [--no-captions] [--no-intro] [--click "Pause@3000,Resume@9000"]  (buttons: Back, Pause, Next, Skip act, Speed) [--no-video] [--gif]
+//   node demo/run-demo.mjs [--pause 2500] [--headless] [--only 3,4] [--bail] [--light] [--no-captions] [--no-intro] [--publish-screenshots] [--click "Pause@3000,Resume@9000"]  (buttons: Back, Pause, Next, Skip act, Speed) [--no-video] [--gif]
 // --pause    milliseconds to hold after each act so an audience can read (default 2500; 0 = as fast as possible)
 // --only     comma list of act numbers; later acts need the earlier ones to have run on this stack
 // dark mode is the default (the landing page, dashboard and report pages follow the browser colour scheme); --light switches it off
@@ -423,8 +423,8 @@ async function intro() {
       await page.waitForTimeout(pause ? 800 : 100); // let any scroll settle before the caption is drawn
       await drawCaption(page, cap);
       console.log(`   ${i + 1}. ${s.title}`);
+      await page.screenshot({ path: join(out, `00-intro-${i + 1}.png`) }); // the visible part only: that is what the audience sees
       if (await linger(Math.round(pause * 4), { onBack: true }) === "back") i = Math.max(-1, i - 2); // back goes to the previous scene (the first restarts)
-      await linger(Math.round(pause * 4));
     } catch (e) { console.log(`   (introduction page ${i + 1} skipped: ${e.message.split("\n")[0]})`); }
   }
   cap = { label: "Introduction", title: "Now, the demonstration", what: "A local copy, running in containers on this machine, with two example plugins: one ordinary, and one built to look suspicious (it is inert). Watch what the admin sees and what a user sees at each step.", why: "Seeing the same plugin before and after each decision is the clearest way to show what the process protects." };
@@ -455,6 +455,21 @@ if (video) {
       console.log(r.status === 0 ? "gif: " + gif : "gif not made: ffmpeg is needed on the PATH (winget install Gyan.FFmpeg)");
     }
   }
+}
+// --publish-screenshots: copy a curated set of this run's screenshots into demo/screenshots/ (committed, shown in the READMEs). Only from a clean
+// run of the whole demo with captions and the introduction on, so the set is complete and shows what the product really does.
+if (flag("publish-screenshots")) {
+  const SET = [
+    ["00-intro-2.png", "01-how-it-works.png"], ["04-users-before-approval.png", "02-public-page-before-approval.png"],
+    ["04-plugins-reviewed.png", "03-dashboard-reviewed.png"], ["04-review-report-shady-sync.png", "04-review-report-shady-sync.png"],
+    ["06-shady-needs-override.png", "05-override-required.png"], ["06-approved-1.0.0.png", "06-approved.png"],
+    ["06-users-after-approval.png", "07-public-page-after-approval.png"], ["08-clients.png", "08-clients.png"], ["11-rubric.png", "09-rubric.png"],
+  ];
+  const dest = join(root, "demo", "screenshots");
+  const missing = SET.filter(([from]) => !existsSync(join(out, from)));
+  if (failures.length || only || flag("no-intro") || !captionsOn) console.log("screenshots not published: needs a complete run (no failures, no --only, --no-intro or --no-captions)");
+  else if (missing.length) console.log("screenshots not published: missing " + missing.map((m) => m[0]).join(", "));
+  else { rmSync(dest, { recursive: true, force: true }); mkdirSync(dest, { recursive: true }); for (const [from, to] of SET) copyFileSync(join(out, from), join(dest, to)); console.log(`published ${SET.length} screenshots to demo/screenshots/`); }
 }
 await browser.close();
 console.log(`\nscreenshots: ${out}`);

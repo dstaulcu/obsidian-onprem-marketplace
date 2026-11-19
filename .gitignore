@@ -10,10 +10,7 @@ keys/
 signing-key*
 
 # demo outputs
-demo/registry/
 demo/vault/
-demo/keys/
-demo/tamper-backup/
 
 # local container test config (certs, keys, password hashes)
 config/
@@ -27,3 +24,4 @@ secrets/
 ui-check-out/
 demo/stack/
 demo/demo-out/
+demo/vault-tamper/
