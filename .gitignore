@@ -25,3 +25,5 @@ registry-data/
 secrets/
 !.env.example
 ui-check-out/
+demo/stack/
+demo/demo-out/

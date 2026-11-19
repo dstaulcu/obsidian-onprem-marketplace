@@ -1,41 +1,110 @@
-# Demo playbook
+# Demo
 
-An offline demonstration of the whole flow with two inert plugins and a fake GitHub:
+A scripted, repeatable demonstration of the whole flow, driven by [Playwright](https://playwright.dev) in a real browser. It opens with a
+short tour of the project on GitHub, then runs the product itself, from containers on your machine, with two inert plugins and a fake
+GitHub. Every step has an on-screen caption saying what is happening and why, and the run is recorded as one video.
 
-- **hello-notes** (1.0.0, 1.1.0): a benign plugin that inserts the date and time. It should review clean and be approved.
+- **hello-notes** (1.0.0, 1.1.0): a benign plugin that inserts the date and time. It reviews clean and is approved.
 - **shady-sync** (1.0.0): deliberately suspicious-looking and **inert** (nothing in it is ever called). It trips several checks and
-  even contains a prompt-injection attempt aimed at the reviewing model. It should never reach users.
+  even contains a prompt-injection attempt aimed at the reviewing model. It never reaches users.
 
-> **Status: draft, not yet run end to end.** The scripts below date from the command-line era and have not been re-run since the
-> marketplace page, the admin dashboard, the containers and `om` were added. Each flow in the script has been exercised separately
-> against the real stack (not with these fixtures), but nobody has performed the whole walkthrough yet. Run it once, fix what breaks,
-> then remove this note. The to-do list is at the end.
+## Run it
 
-## The story (what the audience sees)
+Needs Node 20+, Docker Desktop (running) and Edge or Chrome. From the repository root:
 
-Each act says where it happens and what to point out. "Expected" is what should happen, not a record of what was observed.
+```powershell
+npm install; npm run build
+npx playwright-core install ffmpeg   # once: the small recorder Playwright uses for the video
+npm run demo:reset                   # a clean stack: demo-only key, certificate and login; containers up; nothing synced
+npm run demo                         # the introduction, then acts 1 to 11, in a visible browser, in dark mode
+npm run demo:down                    # stop and remove the demo containers and host servers
+```
 
-| # | Act | Where | Expected |
+Run `demo:reset` before every full run: the acts change the registry, so a second run on the same stack would not start from
+"nothing approved". Output goes to `demo/demo-out/` (gitignored): a screenshot per step and `demo.webm`.
+
+| Option (after `--`) | Effect |
+|---|---|
+| `--pause 2500` | milliseconds each caption is held (default 2500; `0` = as fast as possible) |
+| `--headless` | no visible browser |
+| `--only 0,3,4` | only those parts (`0` is the introduction); later acts need the earlier ones to have run on this stack |
+| `--no-intro` | skip the GitHub tour (it is the only part that needs the internet; it is skipped automatically if github.com is unreachable) |
+| `--no-captions` / `--no-video` / `--light` | no caption bar / no recording / light mode |
+| `--gif` | also write `demo.gif` (needs `ffmpeg` on the PATH, for example `winget install Gyan.FFmpeg`) |
+| `--bail` | stop at the first act that fails |
+
+Each act checks what it should produce, and the exit code is 1 if any check fails.
+
+**Presenter controls.** The caption bar shows a countdown ("next in 6s") and a progress line along its top edge, with buttons at the right,
+so you can talk over a step or move on:
+
+| Control | Effect |
+|---|---|
+| **Pause** / **Resume** (Space) | Holds at the current caption until resumed; the countdown stops while paused and the progress line turns amber. If a step is in progress, the pause takes effect at the next caption. |
+| **Next →** (right arrow) | Ends the current caption now. While paused, each press steps to the next caption and stays paused. |
+| **← Back** (left arrow) | In the introduction, goes to the previous scene; in a review report, to the previous section. Anywhere else it replays the current caption from the start. It cannot undo a change already made to the registry (an approval, a withdrawal). |
+| **Skip act** | Fast-forwards the rest of this act's pauses (the actions and checks still run), then the next act starts at normal pace. |
+| **Speed** | Cycles the reading pauses through 1×, 1.5×, 2× and 0.5×. |
+
+They only change the reading pauses, never the checks or the actions.
+
+`--click "Pause@20000,Resume@30000"` presses buttons by label at given times (ms from the start), for unattended runs, and
+`--click "!shot@9000"` saves a screenshot of the screen at that moment (`demo-out/click-shot-9000.png`).
+
+## What the audience sees
+
+**Introduction (about a minute).** The project's own GitHub page, with a caption on each part: what the project is and why it exists, how
+a plugin gets from a repository to a user, what users and admins each do, how the signing key is kept away from the web-facing service,
+and the written trust model. It ends by explaining what the demonstration shows.
+
+**Acts.** The public marketplace page (what a user sees) alternates with the admin dashboard, so the effect of each decision is visible.
+
+| # | Act | What happens | What to point out |
 |---|---|---|---|
-| 1 | **A user opens the marketplace page** | browser, `http://localhost:8080` | Plugins tab is empty ("nothing approved yet"); Get started shows the `om.exe` download and the three commands. |
-| 2 | **Admin signs in** | dashboard, `https://localhost:8443` | Cards show 0 plugins; the tabs are Plugins, Clients, Activity, Repositories, Nominations, Rubric, Forwarding, Jobs. |
-| 3 | **Nominate and add a repository** | Repositories tab (type `demo/hello-notes`, **Check**, **Add and sync**); optionally a nomination issue in the Nominations tab | The check shows the plugin id, its versions and that it is acceptable; both versions appear in the Plugins tab, **held back** from users. |
-| 4 | **Review** | Plugins tab, **Review** on each version (or **Review all**) | hello-notes: `pass`. shady-sync: `fail` or `findings`, with hits for the checks it trips, and the report notes that the model was told to ignore the injection. The report includes the plugin's manifest. |
-| 5 | **Report a finding** | shady-sync row, **Report issue** | Opens a prefilled issue page whose text is the review (manifest, checks, model findings). Do not post it in the demo. |
-| 6 | **Approve** | hello-notes 1.0.0, **Approve** (signed by the separate signer container); shady-sync **cannot** be approved without an override reason | An "Approved" badge appears. The signer's log (`docker compose logs signer`) shows the signature. |
-| 7 | **User installs** | marketplace page, then Obsidian: the **On-Prem Marketplace** plugin (store icon) | Only hello-notes is offered; it installs and enables. shady-sync is not listed. |
-| 8 | **Update path** | approve hello-notes 1.1.0 | The plugin shows an update; installing it works. The Clients tab shows the version each client last fetched and the **compatibility** table (hello-notes 1.1.0 needs Obsidian 1.5.0). |
-| 9 | **Tamper** | `.\demo\tamper.ps1`, then try to install or update | The client **refuses**: the file no longer matches the approved hash. `.\demo\tamper.ps1 -Undo` restores it. |
-| 10 | **Pull a version back** | Plugins tab, **Withdraw** a version (and **Release** it again) | It disappears from, then returns to, what users see. Anything already installed stays installed; only new installs and updates change. |
-| 11 | **The rubric** | Rubric tab | The list of checks, the version, and (after changing a rule) which reviews are stale and a free impact estimate. |
+| 1 | **A user opens the marketplace page** | `http://localhost:8180` | Nothing approved yet, so nothing to install. |
+| 2 | **Admin signs in** | dashboard, `https://localhost:8543` | Eight tabs; no plugins yet. |
+| 3 | **Add the repositories** | Repositories tab: **Check**, then **Add and sync** for `demo/hello-notes` and `demo/shady-sync` | The check applies the same rules as sync. Adding also mirrors and reviews. |
+| 4 | **Review** | Plugins tab; then each report, section by section | hello-notes passes. shady-sync fails: the manifest, the fixed checks that fired, the lines they hit, and the model's findings including the injection attempt it ignored. The public page still shows nothing. |
+| 5 | **Report a finding** | shady-sync, **Report issue** | A prefilled issue with the review text, shown only inside code fences. Nothing is posted. *Known gap, see below.* |
+| 6 | **Approve** | shady-sync cannot be approved without a written reason; hello-notes 1.0.0 is approved by the separate signer | The signer's log shows the signature. The public page now offers hello-notes, and still not shady-sync. |
+| 7 | **A user installs** | the `om` installer on a demo vault (stands in for the Obsidian plugin) | Only the approved plugin installs; shady-sync is not offered and is refused. |
+| 8 | **An update** | approve hello-notes 1.1.0; the client updates; Clients tab | The public page now shows 1.1.0. |
+| 9 | **Tamper** | a byte is added to `main.js` on the web server after approval | The client refuses it: it no longer matches the approved hash. The file is then restored. |
+| 10 | **Pull a version back** | **Withdraw** 1.1.0, then approve it again | The public page falls back to 1.0.0, then returns to 1.1.0. Installed copies are untouched. |
+| 11 | **The rubric** | Rubric tab | The checks are data; a change marks older reviews stale. |
 
-Say out loud in act 6 or 9: the admin container never holds the signing key, and a file changed on the web server after approval
-fails the check on the client.
+Say aloud in acts 6 and 9: the admin container never holds the signing key, and a file changed on the web server after approval fails
+the check on the client.
 
-## Setup, command-line track (the existing scripts)
+## How it is built
 
-Runs on the host with Node and no containers. Good for acts 4 (reviews), 6 (approve on the command line), 7, 9. It has no dashboard and
-no marketplace page, so acts 1 to 3, 5, 8 and 10 to 11 cannot be shown this way.
+- **Isolated stack.** `demo/docker-compose.yml` is a separate compose project (`om-demo`) with its own data (`demo/stack/`, gitignored),
+  volumes and ports, so it runs next to a real deployment and never touches `registry-data/` or `config/`. `demo/stack.mjs`
+  (`up`, `down`, `reset`) generates the demo-only signing key, certificate and login (`demo/stack/login.txt`) and starts the containers.
+  Ports: registry 8180, admin 8543, fake GitHub 9190, fake model 9191.
+- **Fake GitHub** (`fake-github.mjs`) serves `fixtures/` as GitHub releases. **Fake model** (`fake-model.mjs`) is an OpenAI-compatible
+  stand-in with recorded answers, so reviews are repeatable, free and need no API key. The fixed checks and the admin's validation of
+  the answer are the real ones.
+- **`publishPolicy: "approved"`.** A version stays held back from users until an admin approval matches it, which is what makes the
+  before and after visible. (With the default, `"all"`, the public page lists everything mirrored.)
+- **`run-demo.mjs`** is the orchestrator: one browser page for the whole run (so there is one continuous video), a caption bar drawn
+  through the page's DOM (the dashboard's content security policy forbids anything inline), and a check after each act.
+- Docker Desktop resolves `host.docker.internal` itself. On a Linux engine add `extra_hosts: ["host.docker.internal:host-gateway"]` to
+  admin and reviewer in `demo/docker-compose.yml`.
+- Obsidian itself cannot be driven by Playwright, so the client side of acts 7 to 10 runs the real `om` installer. To show the plugin's
+  own window, point Obsidian at `demo/vault` by hand.
+
+## Known gaps
+
+- **No "Report issue" button for a plugin with nothing published** (act 5). The button is built from the repository recorded in
+  `index.json`, which lists only published plugins, so under `publishPolicy: "approved"` a plugin that failed review has none. The demo
+  reports this as a known gap, not a failure.
+- Not covered: publishing `om.exe` to the downloads (the Get started tab), nominations, and the Splunk tab.
+
+## Command-line track (no containers, no dashboard)
+
+The original host-only scripts: good for reviews, approving on the command line, installing and tampering, but there is no dashboard or
+marketplace page, so the dashboard acts cannot be shown this way. Not re-run since the dashboard, containers and `om` were added.
 
 ```powershell
 npm install; npm run build
@@ -45,33 +114,18 @@ npm install; npm run build
 node packages/sync/dist/cli.js demo/registry.config.json
 node packages/sync/dist/cli.js review --all --config demo/registry.config.json
 node packages/sync/dist/cli.js approve hello-notes@1.0.0 --key demo/keys/signing-key.pem --registry demo/registry
+.\demo\tamper.ps1                # changes a file on the "server" after approval; -Undo restores it
 ```
 
 Open `demo\vault` in Obsidian once and turn Restricted mode off before presenting.
 
-## Setup, dashboard track (to build)
-
-The goal is the full story above, from the containers, without touching your real registry folder. It does not exist yet. What it
-needs:
-
-1. A separate compose project (for example `docker compose -p om-demo`) with its **own** data folder (`demo/registry`), config
-   folder (`demo/config`), audit volume and ports, so it can run next to a real deployment and never touches `registry-data/`.
-2. The fake GitHub reachable **from the containers**: today it listens on `127.0.0.1` only, so it needs a host/bind option, and the
-   demo `registry.config.json` must point `githubApiBase` at `http://host.docker.internal:9090` (to be confirmed on Rancher Desktop).
-3. A demo admin config (test login, `registryUrl`, `githubWebBase`) and a demo signing key created by `01-reset.ps1`, mounted to the
-   signer only. Never reuse a real key.
-4. A review model for the reviewer container: `ANTHROPIC_API_KEY`, or an OpenAI-compatible service (see
-   [Deploying](../docs/deploy.md#reviews-with-an-openai-compatible-model-service)). A pre-recorded reviewer answer would make the demo
-   repeatable and free of cost; that is an option to consider.
-5. `om.exe` published to the demo registry's downloads (`publish-download`), so the Get started tab is real.
-6. A reset script for this track (stop, delete the demo folders, recreate).
-
 ## To do
 
+- [x] Dashboard track built, and all eleven acts run headless (`--pause 0`).
+- [ ] One paced, visible run in front of a person, then adjust caption wording and timing.
 - [ ] Run the command-line track end to end and fix whatever has drifted (flags, config names, ports).
-- [ ] Build the dashboard track (list above), then run all eleven acts and correct the "Expected" column to what really happens.
-- [ ] Record a new walkthrough (the existing recording shows only the Obsidian plugin lifecycle) and add it here.
-- [ ] Remove the "draft" status note above and update the "Want to see it first?" line in the top-level README.
+- [ ] Publish a recording of the new walkthrough here (the one below shows only the Obsidian plugin lifecycle).
+- [ ] Update the "Want to see it first?" line in the top-level README.
 
 ## Client plugin lifecycle
 

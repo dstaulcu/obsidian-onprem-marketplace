@@ -1,0 +1,78 @@
+# The demo's own container stack. It is a separate compose project (om-demo) with its OWN data, config, volumes and ports, so it can run
+# next to a real deployment and never touches registry-data/ or config/. Everything it needs is generated into demo/stack/ by
+# `node demo/stack.mjs up`; do not start it by hand. The fake GitHub (:9190) and the fake model service (:9191) run on the host and
+# are reached from the containers as host.docker.internal.
+name: om-demo
+
+# Docker Desktop (Windows/macOS) resolves host.docker.internal by itself. On a Linux engine add to admin and reviewer:
+#   extra_hosts: ["host.docker.internal:host-gateway"]
+
+services:
+  init:
+    image: busybox:stable
+    user: "0"
+    command: ["sh", "-c", "chown 10001:10001 /data /audit /queue /signq 2>/dev/null; chmod 755 /data /audit 2>/dev/null; chmod 750 /queue /signq 2>/dev/null; exit 0"]
+    volumes: ["./stack/registry-data:/data", "audit:/audit", "queue:/queue", "signq:/signq"]
+    restart: "no"
+
+  admin:
+    build: { context: .. }
+    user: "10001:10001"
+    depends_on: { init: { condition: service_completed_successfully } }
+    ports: ["8543:8443"]
+    volumes: ["./stack/registry-data:/data", "audit:/audit", "queue:/queue", "signq:/signq", "logs:/logs:ro", "./stack/config:/config:ro"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+
+  registry:
+    image: nginx:stable-alpine
+    ports: ["8180:80"]
+    volumes:
+      - ./stack/registry-data:/usr/share/nginx/html:ro
+      - ../deploy/nginx-om.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../deploy/landing:/usr/share/nginx/landing:ro
+      - ./stack/config/nginx-extra:/etc/nginx/om-extra:ro
+      - ./stack/config/public-key.txt:/usr/share/nginx/keys/public-key.txt:ro
+      - logs:/var/log/om
+    read_only: true
+    tmpfs: ["/var/cache/nginx", "/var/run", "/tmp"]
+    restart: "no"
+
+  # Answers review prompts from the fake model service (review.provider "openai-compatible"), so no Anthropic key is involved.
+  reviewer:
+    build: { context: .., dockerfile: deploy/reviewer/Dockerfile, args: { INSTALL_CLAUDE_CODE: "false" } }
+    user: "10001:10001"
+    depends_on: { init: { condition: service_completed_successfully } }
+    volumes: ["queue:/queue", "./stack/config/registry.config.json:/config/registry.config.json:ro"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+
+  # The only container with the (demo-only) signing key. No network.
+  signer:
+    build: { context: .., dockerfile: deploy/signer/Dockerfile }
+    user: "10001:10001"
+    network_mode: none
+    depends_on: { init: { condition: service_completed_successfully } }
+    volumes: ["./stack/registry-data:/data:ro", "signq:/signq", "./stack/config/public-key.txt:/config/public-key.txt:ro"]
+    secrets: [{ source: signing-key, target: signing-key }]
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+
+secrets:
+  signing-key:
+    file: ./stack/secrets/signing-key.pem
+
+volumes:
+  audit:
+  logs:
+  queue:
+  signq:
